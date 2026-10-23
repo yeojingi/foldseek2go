@@ -1,0 +1,1589 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Query GO</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.20.1/cytoscape.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+#topbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+          background: #f5f5f5; border-bottom: 1px solid #ddd; flex-shrink: 0; font-size: 12px; }
+#gogStatus { font-size: 12px; }
+#gogStatus.ok  { color: #2a9d2a; }
+#gogStatus.err { color: #c00; }
+#fallback { display: none; align-items: center; gap: 6px; }
+#fallback label { color: #888; }
+#main { display: flex; flex: 1; overflow: hidden; }
+#sidebar { width: 260px; display: flex; flex-direction: column;
+           border-right: 1px solid #ccc; flex-shrink: 0; }
+#list-header { display: flex; align-items: center; gap: 6px;
+               padding: 6px 8px; border-bottom: 1px solid #eee;
+               font-size: 11px; color: #666; flex-shrink: 0; }
+#list-header select { font-size: 11px; border: 1px solid #ccc;
+                      border-radius: 3px; padding: 1px 3px; }
+#list-header .qcount { margin-left: auto; color: #aaa; }
+#list { flex: 1; overflow-y: auto; padding: 4px; }
+#list .item { padding: 4px 8px; cursor: pointer; border-radius: 4px;
+              font-size: 12px; display: flex; align-items: center; gap: 0; min-width: 0; }
+#list .item:hover  { background: #f0f4ff; }
+#list .item.active { background: #4a90d9; color: white; }
+#list .item.active .item-sep { color: rgba(255,255,255,0.5); }
+#list .item.active .item-prot { color: rgba(255,255,255,0.85); }
+.item-qid  { flex: 0 0 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-sep  { flex-shrink: 0; padding: 0 5px; color: #ccc; user-select: none; }
+.item-prot { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+             color: #888; font-size: 11px; }
+#list .loading { padding: 10px 8px; color: #aaa; font-size: 12px; }
+#pagination { display: flex; align-items: center; justify-content: center;
+              gap: 3px; padding: 6px 4px; border-top: 1px solid #eee;
+              flex-shrink: 0; flex-wrap: wrap; }
+#pagination button { min-width: 26px; height: 24px; padding: 0 5px;
+                     border: 1px solid #ddd; border-radius: 3px;
+                     background: #fff; font-size: 11px; cursor: pointer; }
+#pagination button:hover { background: #f0f4ff; }
+#pagination button.active { background: #4a90d9; color: #fff; border-color: #4a90d9; }
+#pagination button:disabled { opacity: 0.4; cursor: default; }
+#graph { flex: 1; display: flex; flex-direction: column; position: relative; }
+#seqbar { display: none; padding: 6px 12px; background: #f8f9fa; color: #333;
+          font-family: monospace; font-size: 11px; line-height: 1.6; flex-shrink: 0;
+          border-bottom: 1px solid #ddd; max-height: 140px; overflow-y: auto; }
+#seqbar .seq-name { color: #2a7a2a; margin-bottom: 2px; }
+#seqbar .seq-body { color: #333; word-break: break-all; white-space: pre-wrap; }
+#seqbar .seq-legend { display: flex; align-items: center; gap: 6px; margin-top: 6px;
+                      font-size: 10px; color: #666; }
+#seqbar .seq-legend canvas { border: 1px solid #ccc; border-radius: 2px; }
+#seqbar .seq-legend .legend-desc { margin-left: 8px; color: #888; font-style: italic; }
+#seq-tip { position: fixed; background: rgba(30,30,30,0.9); color: #fff;
+           padding: 5px 10px; border-radius: 5px; font-size: 11px;
+           pointer-events: none; display: none; z-index: 20;
+           max-width: 260px; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+#cy-wrap { flex: 1; position: relative; }
+#cy { width: 100%; height: 100%; }
+#empty { position: absolute; top: 50%; left: 50%;
+         transform: translate(-50%,-50%);
+         color: #aaa; font-size: 14px; text-align: center; line-height: 2; }
+#tip { position: absolute; background: rgba(0,0,0,0.8); color: #fff;
+       padding: 6px 10px; border-radius: 4px; font-size: 12px;
+       pointer-events: none; display: none; max-width: 280px;
+       line-height: 1.5; z-index: 9; }
+#modal-overlay { display:none; position:fixed; inset:0;
+                 background:rgba(0,0,0,0.45); z-index:100;
+                 align-items:center; justify-content:center; }
+#modal-overlay.open { display:flex; }
+#modal { background:#fff; border-radius:8px; padding:20px 24px;
+         width:560px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.25); }
+#modal h3 { margin:0 0 14px; font-size:14px; color:#333; }
+#modal .cmd-preview { font-family:monospace; font-size:11px; color:#555;
+                      background:#f5f5f5; padding:6px 10px; border-radius:4px;
+                      margin:8px 0 12px; word-break:break-all; }
+#modal .row { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+#modal input[type=number] { flex:1; padding:6px 8px; border:1px solid #ccc;
+                            border-radius:4px; font-size:13px; }
+#modal .btn { padding:6px 14px; border:none; border-radius:4px;
+              cursor:pointer; font-size:13px; }
+#modal .btn-run  { background:#4a90d9; color:#fff; }
+#modal .btn-run:hover { background:#357abd; }
+#modal .btn-close { background:#eee; color:#333; }
+#modal pre { background:#1e1e1e; color:#d4d4d4; padding:12px;
+             border-radius:4px; font-size:11px; max-height:320px;
+             overflow:auto; white-space:pre-wrap; word-break:break-all;
+             margin:0; display:none; }
+#ratio-bar { display: none; position: absolute; bottom: 14px; left: 14px; z-index: 8;
+             background: rgba(255,255,255,0.92); padding: 7px 11px; border-radius: 7px;
+             box-shadow: 0 1px 5px rgba(0,0,0,0.15); font-size: 10px; color: #555; }
+#ratio-bar canvas { border-radius: 2px; border: 1px solid #ddd; }
+.ratio-bar-desc { color: #999; margin-top: 3px; }
+#toggle-wrap { position: absolute; top: 10px; right: 12px; z-index: 8;
+               display: flex; align-items: center; gap: 7px;
+               background: rgba(255,255,255,0.88); padding: 5px 10px;
+               border-radius: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+               font-size: 12px; color: #555; user-select: none; }
+.switch { position: relative; width: 36px; height: 20px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; background: #ccc;
+          border-radius: 20px; cursor: pointer;
+          transition: background 0.2s; }
+.slider:before { content: ''; position: absolute; width: 14px; height: 14px;
+                 left: 3px; top: 3px; background: white; border-radius: 50%;
+                 transition: transform 0.2s; }
+input:checked + .slider { background: #4a90d9; }
+input:checked + .slider:before { transform: translateX(16px); }
+#filterbar { display:none; align-items:flex-end; gap:20px; padding:8px 16px 6px;
+             background:#fafafa; border-bottom:1px solid #e8e8e8;
+             flex-shrink:0; font-size:11px; color:#555; flex-wrap:wrap; }
+#filterbar.visible { display:flex; }
+.fgroup { display:flex; flex-direction:column; gap:2px; }
+.fgroup-row { display:flex; align-items:center; gap:8px; }
+.fgroup label { min-width:70px; font-weight:600; color:#444; }
+.fhist { width:180px; height:28px; display:block; margin-left:78px; }
+.dual-range { position:relative; width:180px; height:22px; }
+#rangeCount { position:fixed; background:rgba(0,0,0,0.75); color:#fff;
+              padding:2px 7px; border-radius:3px; font-size:11px;
+              pointer-events:none; display:none; z-index:200; white-space:nowrap; }
+.dual-range .track { position:absolute; left:0; right:0; top:9px;
+                     height:4px; background:#ddd; border-radius:2px; }
+.dual-range .fill  { position:absolute; top:9px; height:4px;
+                     background:#4a90d9; border-radius:2px; }
+.dual-range input[type=range] {
+  position:absolute; width:100%; top:0; margin:0; padding:0;
+  pointer-events:none; -webkit-appearance:none; appearance:none;
+  background:transparent; height:22px; }
+.dual-range input[type=range]::-webkit-slider-thumb {
+  pointer-events:all; -webkit-appearance:none; width:14px; height:14px;
+  border-radius:50%; background:#4a90d9; border:2px solid #fff;
+  box-shadow:0 1px 3px rgba(0,0,0,0.3); cursor:pointer; }
+.dual-range input[type=range]::-moz-range-thumb {
+  pointer-events:all; width:14px; height:14px;
+  border-radius:50%; background:#4a90d9; border:2px solid #fff;
+  box-shadow:0 1px 3px rgba(0,0,0,0.3); cursor:pointer; }
+.fval { font-family:monospace; font-size:10px; color:#666; min-width:90px; }
+/* --- summary panel --- */
+#summary { display:flex; flex-direction:column; flex:1; overflow:hidden; }
+#summary-header { display:flex; align-items:center; gap:8px; padding:8px 14px;
+                  border-bottom:1px solid #eee; flex-shrink:0; }
+#summary-header h2 { font-size:12px; font-weight:700; color:#444; margin:0; }
+#sum-note { font-size:10px; color:#bbb; margin-left:4px; }
+#summary-close { margin-left:auto; background:none; border:none; cursor:pointer;
+                 color:#aaa; padding:4px; border-radius:4px; line-height:0; }
+#summary-close:hover { background:#f0f0f0; color:#555; }
+#summary-body { display:flex; flex:0 0 auto; overflow:hidden; max-height:170px;
+                border-bottom:1px solid #eee; }
+.sum-section { flex:1; display:flex; flex-direction:column; padding:10px 14px;
+               border-right:1px solid #f0f0f0; overflow-y:auto; min-width:0; }
+.sum-section:last-child { border-right:none; }
+.sum-section-title { font-size:10px; font-weight:700; color:#666; text-transform:uppercase;
+                     letter-spacing:0.6px; margin-bottom:8px;
+                     display:flex; align-items:center; gap:6px; }
+.sum-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.sum-bar-row { display:flex; align-items:center; gap:7px; margin-bottom:7px; cursor:default; }
+.sum-bar-row:hover .sum-label { color:#222; }
+.sum-label { font-size:11px; color:#555; width:130px; flex-shrink:0;
+             overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sum-track { flex:1; height:12px; background:#f3f3f3; border-radius:3px; overflow:hidden; min-width:0; }
+.sum-fill { height:100%; border-radius:3px; }
+.sum-count { font-size:10px; color:#aaa; width:32px; text-align:right; flex-shrink:0; font-family:monospace; }
+.sum-loading { padding:16px 0; color:#bbb; font-size:12px; text-align:center; }
+/* enrichment section */
+#sum-enrichment { flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+#sum-enrich-hdr { display:flex; align-items:center; gap:7px; padding:6px 14px;
+                  border-bottom:1px solid #eee; flex-shrink:0; font-size:11px;
+                  font-weight:600; color:#444; }
+#sum-enrich-hdr .enrich-query-name { color:#aaa; font-weight:400; font-size:10px; }
+.ns-tab { padding:2px 7px; border:1px solid #ddd; border-radius:3px;
+          background:#fff; font-size:10px; cursor:pointer; color:#777; }
+.ns-tab:hover { background:#f5f5f5; }
+.ns-tab.active { background:#4a90d9; color:#fff; border-color:#4a90d9; }
+#sum-enrich-body { flex:1; display:flex; overflow:hidden; min-height:0; }
+#enrich-placeholder { flex:1; display:flex; align-items:center; justify-content:center;
+                      color:#bbb; font-size:12px; }
+#enrich-no-db { flex:1; display:flex; flex-direction:column; align-items:center;
+                justify-content:center; gap:5px; color:#aaa; font-size:11px; }
+#enrich-no-db code { font-size:10px; color:#bbb; background:#f5f5f5; padding:2px 6px; border-radius:3px; }
+#enrich-content { flex:1; display:flex; overflow:hidden; }
+#enrich-volcano-wrap { flex:0 0 260px; display:flex; flex-direction:column;
+                       border-right:1px solid #f0f0f0; padding:4px; }
+#enrich-volcano { width:100%; flex:1; }
+#enrich-table-wrap { flex:1; overflow-y:auto; font-size:11px; }
+#enrich-table { width:100%; border-collapse:collapse; }
+#enrich-table th { position:sticky; top:0; background:#f8f8f8; padding:5px 8px;
+                   text-align:left; border-bottom:1px solid #ddd; font-weight:600;
+                   font-size:10px; color:#666; white-space:nowrap; }
+#enrich-table td { padding:4px 8px; border-bottom:1px solid #f5f5f5; white-space:nowrap; cursor:pointer; }
+#enrich-table tr:hover td { background:#f5f8ff; }
+#enrich-table tr.e-hl td { background:#fff5e0; }
+.enrich-go-id { font-family:monospace; font-size:10px; color:#999; }
+.enrich-name { max-width:200px; overflow:hidden; text-overflow:ellipsis; }
+.enrich-sig { font-weight:700; color:#d04040; }
+.enrich-adj-p { font-family:monospace; }
+/* topbar summary toggle */
+#sum-toggle { display:flex; align-items:center; gap:5px; margin-left:auto;
+              padding:4px 10px; border:1px solid #ddd; border-radius:4px;
+              background:#fff; font-size:11px; color:#666; cursor:pointer; }
+#sum-toggle:hover { background:#f5f5f5; }
+#sum-toggle.active { background:#edf4ff; border-color:#4a90d9; color:#4a90d9; }
+</style></head>
+<body>
+<div id="modal-overlay">
+  <div id="modal">
+    <h3>mmseqs view</h3>
+    <div class="row">
+      <input type="number" id="viewId" min="0" placeholder="numeric id" oninput="updateCmd()">
+      <button class="btn btn-run" onclick="runView()">Run</button>
+      <button class="btn btn-close" onclick="closeModal()">Close</button>
+    </div>
+    <div class="cmd-preview" id="cmdPreview">-</div>
+    <pre id="viewOutput"></pre>
+  </div>
+</div>
+<div id="topbar">
+  <span id="gogStatus">Loading GOG...</span>
+  <span id="fallback">
+    <label>Select manually:</label>
+    <input type="file" id="gogFile">
+  </span>
+  <button id="sum-toggle" class="active" onclick="toggleSummary()">
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor">
+      <rect x="0" y="8" width="3" height="5" rx="1"/>
+      <rect x="4" y="4" width="3" height="9" rx="1"/>
+      <rect x="8" y="1" width="3" height="12" rx="1"/>
+      <rect x="12" y="6" width="1" height="7" rx="0.5"/>
+    </svg>
+    Summary
+  </button>
+  <button class="btn btn-run" style="font-size:12px;padding:4px 12px"
+          onclick="openModal()">View Alignment</button>
+</div>
+<div id="filterbar">
+  <div class="fgroup">
+    <canvas class="fhist" id="bsHist"></canvas>
+    <div class="fgroup-row">
+      <label>Bitscore</label>
+      <div class="dual-range"><div class="track"></div><div class="fill" id="bsFill"></div>
+        <input type="range" id="bsLo"><input type="range" id="bsHi"></div>
+      <span class="fval" id="bsVal"></span>
+    </div>
+  </div>
+  <div class="fgroup">
+    <canvas class="fhist" id="evHist"></canvas>
+    <div class="fgroup-row">
+      <label>E-value</label>
+      <div class="dual-range"><div class="track"></div><div class="fill" id="evFill"></div>
+        <input type="range" id="evLo"><input type="range" id="evHi"></div>
+      <span class="fval" id="evVal"></span>
+    </div>
+  </div>
+  <div class="fgroup">
+    <canvas class="fhist" id="siHist"></canvas>
+    <div class="fgroup-row">
+      <label>Seq. identity</label>
+      <div class="dual-range"><div class="track"></div><div class="fill" id="siFill"></div>
+        <input type="range" id="siLo"><input type="range" id="siHi"></div>
+      <span class="fval" id="siVal"></span>
+    </div>
+  </div>
+  <div class="fgroup">
+    <canvas class="fhist" id="covHist"></canvas>
+    <div class="fgroup-row">
+      <label>Coverage</label>
+      <div class="dual-range"><div class="track"></div><div class="fill" id="covFill"></div>
+        <input type="range" id="covLo"><input type="range" id="covHi"></div>
+      <span class="fval" id="covVal"></span>
+    </div>
+  </div>
+</div>
+<div id="rangeCount"></div>
+<div id="main">
+  <div id="sidebar">
+    <div id="list-header">
+      <span>Per page:</span>
+      <select id="pageSizeSelect">
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+      <span class="qcount" id="qcount"></span>
+    </div>
+    <div id="list"></div>
+    <div id="pagination"></div>
+  </div>
+  <div id="graph">
+    <div id="summary">
+      <div id="summary-header">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="#888">
+          <rect x="0" y="9" width="3" height="5" rx="1"/>
+          <rect x="4" y="5" width="3" height="9" rx="1"/>
+          <rect x="8" y="1" width="3" height="13" rx="1"/>
+          <rect x="12" y="7" width="2" height="7" rx="1"/>
+        </svg>
+        <h2>Query Annotation Summary</h2>
+        <span id="sum-note">loading…</span>
+        <button id="summary-close" title="Collapse" onclick="toggleSummary()">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <polyline points="2,9 7,4 12,9"/>
+          </svg>
+        </button>
+      </div>
+      <div id="summary-body"><div class="sum-loading">Loading GO data…</div></div>
+      <div id="sum-enrichment">
+        <div id="sum-enrich-hdr">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#777" stroke-width="1.4" stroke-linecap="round">
+            <circle cx="6" cy="4.5" r="3.5"/>
+            <line x1="6" y1="8" x2="6" y2="12"/>
+            <line x1="4" y1="10" x2="8" y2="10"/>
+          </svg>
+          Enrichment
+          <span id="enrich-query-name" class="enrich-query-name">— all queries</span>
+          <div id="ns-tabs" style="margin-left:auto;display:flex;gap:3px;">
+            <button class="ns-tab active" data-ns="all" onclick="setEnrichNs('all')">All</button>
+            <button class="ns-tab" data-ns="biological_process" onclick="setEnrichNs('biological_process')">BP</button>
+            <button class="ns-tab" data-ns="molecular_function" onclick="setEnrichNs('molecular_function')">MF</button>
+            <button class="ns-tab" data-ns="cellular_component" onclick="setEnrichNs('cellular_component')">CC</button>
+          </div>
+        </div>
+        <div id="sum-enrich-body">
+          <div id="enrich-placeholder">Loading enrichment…</div>
+          <div id="enrich-no-db" style="display:none">
+            <span>No enrichment DB — run:</span>
+            <code>m2g goenrich queryDB targetDB alignmentDB enrichDB</code>
+            <span style="font-size:10px">then rerun functionreport with <code>--enrich-db enrichDB</code></span>
+          </div>
+          <div id="enrich-content" style="display:none">
+            <div id="enrich-volcano-wrap">
+              <canvas id="enrich-volcano"></canvas>
+            </div>
+            <div id="enrich-table-wrap">
+              <table id="enrich-table">
+                <thead><tr>
+                  <th>GO ID</th><th>Name</th><th>NS</th><th>k/M</th><th>Ratio</th><th>adj.p</th>
+                </tr></thead>
+                <tbody id="enrich-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="seqbar"></div>
+    <div id="cy-wrap" style="display:none">
+    <div id="cy"></div>
+    <div id="empty">Loading GOG file...</div>
+    <div id="toggle-wrap">
+      <label class="switch">
+        <input type="checkbox" id="toggleIntermediate">
+        <span class="slider"></span>
+      </label>
+      <span>Intermediate nodes</span>
+    </div>
+    <div id="ratio-bar">
+      <div style="margin-bottom:3px;font-weight:600;">Target overlap ratio</div>
+      <div style="display:flex;align-items:center;gap:5px;">
+        <span>0%</span>
+        <canvas id="ratio-colorbar" width="100" height="10"></canvas>
+        <span>100%</span>
+      </div>
+      <div class="ratio-bar-desc">% of selected GO's targets that also have this GO</div>
+    </div>
+    </div><!-- cy-wrap -->
+  </div>
+</div>
+<div id="tip"></div>
+<div id="seq-tip"></div>
+<script>
+/* INJECT_DATA */
+const ROOTS = {
+  biological_process: {id:'GO:0008150',label:'Biological\nProcess',color:'#a8d8ea'},
+  molecular_function:  {id:'GO:0003674',label:'Molecular\nFunction',color:'#a8e6cf'},
+  cellular_component:  {id:'GO:0005575',label:'Cellular\nComponent',color:'#ffd3b6'}
+};
+
+const ENRICH_GLOBAL_PATH = ENRICH_DB_PATH ? ENRICH_DB_PATH + '_global' : '';
+
+let goInfo = null;
+let cy = null;
+let currentGos = null;
+let currentQueryGos = null;
+let showIntermediate = false;
+let allTargetStats = null;
+let filterDebounce = null;
+let currentSeq = '';
+let currentGoCoverage = null;
+let currentGoTargets = null;
+
+// --- range count tooltip ---
+const rangeCountEl = document.getElementById('rangeCount');
+document.addEventListener('mousemove', e => {
+  if (rangeCountEl.style.display !== 'none') {
+    rangeCountEl.style.left = (e.clientX + 14) + 'px';
+    rangeCountEl.style.top  = (e.clientY - 22) + 'px';
+  }
+});
+document.addEventListener('mouseup', () => { rangeCountEl.style.display = 'none'; });
+
+function countInRange(vals, lo, hi) {
+  return vals.filter(v => v >= lo && v <= hi).length;
+}
+
+// --- histogram drawing ---
+function drawHistogram(canvasId, vals, getBucketRange, BINS) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  // Use actual rendered size
+  const W = canvas.offsetWidth || 180;
+  const H = canvas.offsetHeight || 28;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  if (!vals.length) return;
+
+  const bins = new Array(BINS).fill(0);
+  const [minV, maxV] = getBucketRange();
+  const range = maxV - minV || 1;
+  for (const v of vals) {
+    const bi = Math.min(BINS - 1, Math.floor((v - minV) / range * BINS));
+    bins[bi]++;
+  }
+  const maxBin = Math.max(...bins) || 1;
+
+  ctx.fillStyle = 'rgba(74,144,217,0.55)';
+  const bw = W / BINS;
+  for (let i = 0; i < BINS; i++) {
+    const bh = (bins[i] / maxBin) * (H - 1);
+    ctx.fillRect(i * bw, H - bh, Math.max(1, bw - 0.5), bh);
+  }
+}
+
+// --- dual range slider helpers ---
+function initSlider(loId, hiId, fillId, valId, min, max, steps, fmt, rawVals) {
+  const lo = document.getElementById(loId);
+  const hi = document.getElementById(hiId);
+  const fill = document.getElementById(fillId);
+  const val = document.getElementById(valId);
+  lo.min = hi.min = 0; lo.max = hi.max = steps;
+  lo.value = 0; hi.value = steps;
+  function update() {
+    let l = parseInt(lo.value), h = parseInt(hi.value);
+    if (l > h) { if (this === lo) lo.value = l = h; else hi.value = h = l; }
+    const pct = 100 / steps;
+    fill.style.left = (l * pct) + '%';
+    fill.style.width = ((h - l) * pct) + '%';
+    val.textContent = fmt(l, h, min, max, steps);
+    if (rawVals) {
+      const lo_ = sliderToVal(l, steps, min, max);
+      const hi_ = sliderToVal(h, steps, min, max);
+      const cnt = countInRange(rawVals, lo_, hi_);
+      rangeCountEl.textContent = cnt + ' / ' + rawVals.length;
+      rangeCountEl.style.display = 'block';
+    }
+    clearTimeout(filterDebounce);
+    filterDebounce = setTimeout(applyFilter, 300);
+  }
+  function stopCount() { rangeCountEl.style.display = 'none'; }
+  lo.oninput = hi.oninput = update;
+  lo.onmouseup = lo.ontouchend = hi.onmouseup = hi.ontouchend = stopCount;
+  update.call(lo);
+}
+
+function sliderToVal(step, steps, min, max) {
+  return min + (max - min) * (step / steps);
+}
+function fmtBs(l, h, min, max, steps) {
+  return sliderToVal(l,steps,min,max).toFixed(0) + ' \u2013 ' + sliderToVal(h,steps,min,max).toFixed(0);
+}
+function fmtEv(l, h, min, max, steps) {
+  function fmt(logV) { const v = Math.pow(10, logV); return v.toExponential(1); }
+  return fmt(sliderToVal(l,steps,min,max)) + ' \u2013 ' + fmt(sliderToVal(h,steps,min,max));
+}
+function fmtPct(l, h, min, max, steps) {
+  return (sliderToVal(l,steps,min,max)*100).toFixed(0) + '% \u2013 ' + (sliderToVal(h,steps,min,max)*100).toFixed(0) + '%';
+}
+
+function setupFilters(stats) {
+  allTargetStats = stats;
+  const ids = Object.keys(stats);
+  const bsVals  = ids.map(id => stats[id].bitscore);
+  const evVals  = ids.map(id => Math.log10(Math.max(parseFloat(stats[id].evalue), 1e-300)));
+  const siVals  = ids.map(id => stats[id].seqId);
+  const covVals = ids.map(id => stats[id].cov);
+  const STEPS = 200;
+  const BINS  = 40;
+  const ranges = {
+    bs:  [Math.min(...bsVals),  Math.max(...bsVals)],
+    ev:  [Math.min(...evVals),  Math.max(...evVals)],
+    si:  [Math.min(...siVals),  Math.max(...siVals)],
+    cov: [Math.min(...covVals), Math.max(...covVals)]
+  };
+  document.getElementById('filterbar').classList.add('visible');
+  // Draw histograms (after filterbar is visible so canvas has layout size)
+  requestAnimationFrame(() => {
+    drawHistogram('bsHist',  bsVals,  () => ranges.bs,  BINS);
+    drawHistogram('evHist',  evVals,  () => ranges.ev,  BINS);
+    drawHistogram('siHist',  siVals,  () => ranges.si,  BINS);
+    drawHistogram('covHist', covVals, () => ranges.cov, BINS);
+  });
+  initSlider('bsLo','bsHi','bsFill','bsVal',   ranges.bs[0],  ranges.bs[1],  STEPS, fmtBs,  bsVals);
+  initSlider('evLo','evHi','evFill','evVal',   ranges.ev[0],  ranges.ev[1],  STEPS, fmtEv,  evVals);
+  initSlider('siLo','siHi','siFill','siVal',   ranges.si[0],  ranges.si[1],  STEPS, fmtPct, siVals);
+  initSlider('covLo','covHi','covFill','covVal',ranges.cov[0], ranges.cov[1], STEPS, fmtPct, covVals);
+  for (const [k,r] of Object.entries(ranges)) {
+    document.getElementById(k+'Lo')._min = r[0]; document.getElementById(k+'Lo')._max = r[1];
+  }
+}
+
+async function applyFilter() {
+  if (!allTargetStats || !goInfo) return;
+  const STEPS = 200;
+  function getRange(k) {
+    const lo = document.getElementById(k+'Lo'), hi = document.getElementById(k+'Hi');
+    return [sliderToVal(+lo.value,STEPS,lo._min,lo._max), sliderToVal(+hi.value,STEPS,lo._min,lo._max)];
+  }
+  const [bsMin,bsMax]   = getRange('bs');
+  const [evMin,evMax]   = getRange('ev');
+  const [siMin,siMax]   = getRange('si');
+  const [covMin,covMax] = getRange('cov');
+  const filteredIds = Object.keys(allTargetStats).filter(id => {
+    const s = allTargetStats[id];
+    const ev = Math.log10(Math.max(parseFloat(s.evalue), 1e-300));
+    return s.bitscore >= bsMin && s.bitscore <= bsMax
+        && ev >= evMin && ev <= evMax
+        && s.seqId >= siMin && s.seqId <= siMax
+        && s.cov >= covMin && s.cov <= covMax;
+  });
+  if (!filteredIds.length) return;
+  try {
+    const r = await fetch('/api/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({cmd:`${PATHS.mmseqs} view ${PATHS.target}_func --id-list ${filteredIds.join(',')}`, cwd:PATHS.cwd})
+    });
+    const d = await r.json();
+    const goCounts = {}, goMinEv = {}, goMaxBs = {}, goTargetsF = {};
+    const entries = d.output.split('\0');
+    for (let i = 0; i < entries.length && i < filteredIds.length; i++) {
+      const s = allTargetStats[filteredIds[i]];
+      const ev = parseFloat(s.evalue);
+      for (const go of entries[i].split('\n').map(x=>x.trim()).filter(x=>x.startsWith('GO:'))) {
+        goCounts[go] = (goCounts[go]||0)+1;
+        if (goMinEv[go]===undefined||ev<goMinEv[go]) goMinEv[go]=ev;
+        if (goMaxBs[go]===undefined||s.bitscore>goMaxBs[go]) goMaxBs[go]=s.bitscore;
+        (goTargetsF[go] || (goTargetsF[go] = [])).push(filteredIds[i]);
+      }
+    }
+    const gos = Object.entries(goCounts).map(([go,n])=>[go,n,goMinEv[go],goMaxBs[go]]);
+    currentGoTargets = goTargetsF;
+    drawGraph(gos);
+  } catch(e) { console.error(e); }
+}
+
+const status  = document.getElementById('gogStatus');
+const fallback = document.getElementById('fallback');
+const empty   = document.getElementById('empty');
+
+// --- pagination ---
+let pageSize = 25;
+let currentPage = 0;
+let activeEntry = null;
+const totalPages = () => Math.ceil(TOTAL_COUNT / pageSize);
+
+document.getElementById('qcount').textContent = TOTAL_COUNT + ' queries';
+document.getElementById('pageSizeSelect').onchange = (e) => {
+  pageSize = parseInt(e.target.value);
+  currentPage = 0;
+  loadPage(0);
+};
+
+function renderPagination() {
+  const pg = document.getElementById('pagination');
+  pg.innerHTML = '';
+  const tp = totalPages();
+  if (tp <= 1) return;
+  const mkBtn = (label, page, disabled, active) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (disabled) b.disabled = true;
+    if (active) b.classList.add('active');
+    if (!disabled) b.onclick = () => loadPage(page);
+    return b;
+  };
+  pg.appendChild(mkBtn('\u00ab', 0, currentPage === 0, false));
+  pg.appendChild(mkBtn('\u2039', currentPage - 1, currentPage === 0, false));
+  const w = 2, start = Math.max(0, currentPage - w), end = Math.min(tp - 1, currentPage + w);
+  if (start > 0) pg.appendChild(mkBtn('1', 0, false, false));
+  if (start > 1) { const s = document.createElement('span'); s.textContent='\u2026'; s.style='font-size:11px;padding:0 2px'; pg.appendChild(s); }
+  for (let p = start; p <= end; p++) pg.appendChild(mkBtn(p+1, p, false, p === currentPage));
+  if (end < tp - 2) { const s = document.createElement('span'); s.textContent='\u2026'; s.style='font-size:11px;padding:0 2px'; pg.appendChild(s); }
+  if (end < tp - 1) pg.appendChild(mkBtn(tp, tp-1, false, false));
+  pg.appendChild(mkBtn('\u203a', currentPage + 1, currentPage === tp - 1, false));
+  pg.appendChild(mkBtn('\u00bb', tp - 1, currentPage === tp - 1, false));
+}
+
+async function loadPage(page) {
+  currentPage = page;
+  const list = document.getElementById('list');
+  list.innerHTML = '<div class="loading">Loading...</div>';
+  renderPagination();
+  const startLine = page * pageSize + 1;
+  const endLine = Math.min((page + 1) * pageSize, TOTAL_COUNT);
+  const cmd = `sed -n '${startLine},${endLine}p' "${IDS_PATH}"`;
+  try {
+    const resp = await fetch('/api/run', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cmd, cwd: PATHS.cwd})
+    });
+    const data = await resp.json();
+    list.innerHTML = '';
+    const entries = data.output.split('\n').filter(l => l.trim()).map(l => {
+      const p = l.split('\t');
+      return {qid: p[0], numId: parseInt(p[1]), prot: p[2] || '', queryGos: p[3] ? p[3].split(';').filter(g => g) : []};
+    });
+
+    for (const {qid, numId, prot, queryGos} of entries) {
+      const el = document.createElement('div');
+      el.className = 'item' + (qid === activeEntry ? ' active' : '');
+
+      const qSpan = document.createElement('span');
+      qSpan.className = 'item-qid'; qSpan.textContent = qid; qSpan.title = qid;
+      const sep = document.createElement('span');
+      sep.className = 'item-sep'; sep.textContent = '|';
+      const pSpan = document.createElement('span');
+      pSpan.className = 'item-prot'; pSpan.textContent = prot; pSpan.title = prot;
+      el.appendChild(qSpan); el.appendChild(sep); el.appendChild(pSpan);
+
+      el.onclick = async () => {
+        document.querySelectorAll('#list .item').forEach(e => e.classList.remove('active'));
+        el.classList.add('active');
+        activeEntry = qid;
+        if (isNaN(numId)) { alert('ID not found for: ' + qid); return; }
+        // fetch and show query sequence
+        currentSeq = '';
+        currentGoCoverage = null;
+        fetch('/api/run', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({cmd: `${PATHS.mmseqs} view ${PATHS.query} --id-list ${numId}`, cwd: PATHS.cwd})
+        }).then(r => r.json()).then(d => {
+          const seq = d.output.split('\0')[0].trim();
+          currentSeq = seq;
+          renderSeqBar(qid, seq);
+        }).catch(() => {});
+        try {
+          const r1 = await fetch('/api/run', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({cmd: `${PATHS.mmseqs} view ${PATHS.aln} --id-list ${numId}`, cwd: PATHS.cwd})
+          });
+          const d1 = await r1.json();
+          const targetStats = {};
+          for (const line of d1.output.split('\n')) {
+            const f = line.split('\t');
+            if (f.length < 6 || !/^\d+$/.test(f[0].trim())) continue;
+            const qLen = parseFloat(f[6]) || 1;
+            // f[4]=qStart, f[5]=qEnd (0-based), f[6]=qLen in standard mmseqs result format
+            targetStats[f[0].trim()] = {
+              bitscore: parseFloat(f[1]),
+              evalue:   f[3],
+              seqId:    parseFloat(f[2]),
+              cov:      parseFloat(f[5]) / qLen,
+              qStart:   parseInt(f[4]) || 0,
+              qEnd:     parseInt(f[5]) || qLen - 1,
+              seqLen:   qLen
+            };
+          }
+          const targetIds = Object.keys(targetStats);
+          if (!targetIds.length) { alert('No targets found\n\nRaw:\n' + d1.output); return; }
+          setupFilters(targetStats);
+          const r2 = await fetch('/api/run', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({cmd: `${PATHS.mmseqs} view ${PATHS.target}_func --id-list ${targetIds.join(',')}`, cwd: PATHS.cwd})
+          });
+          const d2 = await r2.json();
+          const goCounts = {}, goMinEv = {}, goMaxBs = {}, goTargets = {};
+          const entries = d2.output.split('\0');
+          for (let i = 0; i < entries.length && i < targetIds.length; i++) {
+            const stats = targetStats[targetIds[i]];
+            const ev = parseFloat(stats.evalue);
+            for (const go of entries[i].split('\n').map(s => s.trim()).filter(s => s.startsWith('GO:'))) {
+              goCounts[go] = (goCounts[go] || 0) + 1;
+              if (goMinEv[go] === undefined || ev < goMinEv[go]) goMinEv[go] = ev;
+              if (goMaxBs[go] === undefined || stats.bitscore > goMaxBs[go]) goMaxBs[go] = stats.bitscore;
+              (goTargets[go] || (goTargets[go] = [])).push(targetIds[i]);
+            }
+          }
+          // precompute per-position coverage for each GO (done once, used on every click)
+          const seqLen = Object.values(targetStats)[0]?.seqLen || currentSeq.length || 1;
+          const coverage = {};
+          for (const [go, tids] of Object.entries(goTargets)) {
+            const arr = new Float32Array(seqLen);
+            for (const tid of tids) {
+              const s = targetStats[tid];
+              if (!s) continue;
+              for (let p = Math.max(0, s.qStart); p <= Math.min(seqLen - 1, s.qEnd); p++) arr[p]++;
+            }
+            const n = tids.length;
+            for (let p = 0; p < seqLen; p++) arr[p] /= n;
+            coverage[go] = arr;
+          }
+          currentGoCoverage = coverage;
+          const gos = Object.entries(goCounts).map(([go, n]) => [go, n, goMinEv[go], goMaxBs[go]]);
+          if (!goInfo) { alert('GOG not loaded yet \u2014 wait for GO term data'); return; }
+          currentGoTargets = goTargets;
+          drawGraph(gos, queryGos);
+        } catch(e) {
+          alert('[Error] ' + e.message);
+        }
+      };
+      list.appendChild(el);
+    }
+    renderPagination();
+  } catch(e) {
+    list.innerHTML = '<div class="loading">[Error] ' + e.message + '</div>';
+  }
+}
+
+loadPage(0);
+
+function parseGog(text) {
+  const info = {};
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    const parts = line.split(',');
+    if (parts.length < 4) continue;
+    const id = parts[0].trim();
+    const name = parts[1].trim();
+    const parentStr = parts[2].trim();
+    const ns = parts[3].trim();
+    const parents = parentStr ? parentStr.split(';').filter(p => p.startsWith('GO:')) : [];
+    info[id] = {name, ns, parents};
+  }
+  return info;
+}
+
+function openModal() {
+  document.getElementById('modal-overlay').classList.add('open');
+  document.getElementById('viewOutput').style.display = 'none';
+  document.getElementById('viewOutput').textContent = '';
+  updateCmd();
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+document.getElementById('modal-overlay').onclick = (e) => {
+  if (e.target === e.currentTarget) closeModal();
+};
+function updateCmd() {
+  const id = document.getElementById('viewId').value;
+  const cmd = id !== ''
+    ? `${PATHS.mmseqs} view ${PATHS.aln} --id-list ${id}`
+    : `${PATHS.mmseqs} view ${PATHS.aln} --id-list <id>`;
+  document.getElementById('cmdPreview').textContent = cmd;
+}
+async function runView() {
+  const id = document.getElementById('viewId').value;
+  if (id === '') return;
+  const cmd = `${PATHS.mmseqs} view ${PATHS.aln} --id-list ${id}`;
+  const out = document.getElementById('viewOutput');
+  out.textContent = 'Running...';
+  out.style.display = 'block';
+  try {
+    const resp = await fetch('/api/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cmd, cwd: PATHS.cwd})
+    });
+    const data = await resp.json();
+    out.textContent = data.output || '(no output)';
+  } catch(e) {
+    out.textContent = '[Error] ' + e.message + '\nUse server.py instead of python3 -m http.server';
+  }
+}
+
+document.getElementById('toggleIntermediate').onchange = (e) => {
+  showIntermediate = e.target.checked;
+  if (currentGos && goInfo) drawGraph(currentGos);
+};
+
+// ratio color: pale peach → orange (same hue as node, lightness/saturation only)
+function ratioColor(ratio) {
+  const s = Math.round(22 + ratio * 73);
+  const l = Math.round(90 - ratio * 29);
+  return `hsl(26,${s}%,${l}%)`;
+}
+function drawRatioBar(canvas) {
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  for (let i = 0; i <= 10; i++) {
+    const r = i / 10;
+    const s = 22 + r * 73, l = 90 - r * 29;
+    grad.addColorStop(r, `hsl(26,${s}%,${l}%)`);
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// heatmap color stops: gray → blue → green → yellow → red
+const HEATMAP_STOPS = [
+  [0,    [220, 220, 220]],
+  [0.25, [  0, 120, 255]],
+  [0.5,  [  0, 200, 100]],
+  [0.75, [255, 200,   0]],
+  [1.0,  [220,  30,  20]],
+];
+function heatmapColor(f) {
+  const stops = HEATMAP_STOPS;
+  for (let i = 1; i < stops.length; i++) {
+    if (f <= stops[i][0]) {
+      const t = (f - stops[i-1][0]) / (stops[i][0] - stops[i-1][0]);
+      const [r0,g0,b0] = stops[i-1][1], [r1,g1,b1] = stops[i][1];
+      const r = Math.round(r0 + (r1-r0)*t);
+      const g = Math.round(g0 + (g1-g0)*t);
+      const b = Math.round(b0 + (b1-b0)*t);
+      const bright = (0.299*r + 0.587*g + 0.114*b) / 255;
+      return { bg: `rgb(${r},${g},${b})`, fg: bright > 0.55 ? '#111' : '#fff' };
+    }
+  }
+  return { bg: 'rgb(220,30,20)', fg: '#fff' };
+}
+
+function renderColorBar(canvas) {
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  for (const [pos, [r,g,b]] of HEATMAP_STOPS) grad.addColorStop(pos, `rgb(${r},${g},${b})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function renderSeqBar(name, seq, coverage) {
+  const seqbar = document.getElementById('seqbar');
+  const seqTip = document.getElementById('seq-tip');
+  let body = '';
+
+  if (coverage) {
+    for (let i = 0; i < seq.length; i++) {
+      const f = i < coverage.length ? coverage[i] : 0;
+      const pct = (f * 100).toFixed(1);
+      const {bg, fg} = heatmapColor(f);
+      body += `<span style="background:${bg};color:${fg};border-radius:2px;cursor:default" data-pct="${pct}">${seq[i]}</span>`;
+    }
+  } else {
+    body = seq;
+  }
+
+  const legendHtml = coverage
+    ? `<div class="seq-legend">
+         Coverage:&nbsp;0%&nbsp;<canvas id="colorbar" width="120" height="11"></canvas>&nbsp;100%
+         <span class="legend-desc">— % of targets with this GO term aligned to each position</span>
+       </div>`
+    : '';
+
+  seqbar.innerHTML = `<div class="seq-name">&gt;${name}</div><div class="seq-body" id="seq-body-inner">${body}</div>${legendHtml}`;
+  seqbar.style.display = 'block';
+
+  if (coverage) {
+    const cb = document.getElementById('colorbar');
+    if (cb) renderColorBar(cb);
+
+    const bodyEl = document.getElementById('seq-body-inner');
+    bodyEl.addEventListener('mouseover', e => {
+      const span = e.target.closest('span[data-pct]');
+      if (!span) { seqTip.style.display = 'none'; return; }
+      const pct = span.getAttribute('data-pct');
+      seqTip.innerHTML = `<b>${pct}%</b><br><span style="color:#bbb;font-size:10px">fraction of targets with this GO term<br>aligned to this position</span>`;
+      seqTip.style.display = 'block';
+    });
+    bodyEl.addEventListener('mouseout', e => {
+      if (!e.relatedTarget || !e.relatedTarget.closest('span[data-pct]'))
+        seqTip.style.display = 'none';
+    });
+    bodyEl.addEventListener('mousemove', e => {
+      seqTip.style.left = (e.clientX + 14) + 'px';
+      seqTip.style.top  = (e.clientY - 38) + 'px';
+    });
+  } else if (seqTip) {
+    seqTip.style.display = 'none';
+  }
+}
+
+function collectIntermediates(targetSet, rootIds) {
+  const intermediates = {};
+  const visited = new Set();
+  function traverse(goId) {
+    if (!goId || visited.has(goId)) return;
+    visited.add(goId);
+    if (rootIds.has(goId) || targetSet.has(goId)) return;
+    const info = goInfo[goId];
+    if (!info) return;
+    intermediates[goId] = info;
+    for (const pid of (info.parents || [])) { if (pid) traverse(pid); }
+  }
+  for (const goId of targetSet) {
+    const info = goInfo[goId];
+    if (!info) continue;
+    for (const pid of (info.parents || [])) { if (pid) traverse(pid); }
+  }
+  return intermediates;
+}
+
+// --- summary panel ---
+let summaryOpen = true;
+let summaryLoaded = false;
+
+function toggleSummary() {
+  summaryOpen = !summaryOpen;
+  document.getElementById('summary').style.display = summaryOpen ? 'flex' : 'none';
+  document.getElementById('cy-wrap').style.display = summaryOpen ? 'none' : '';
+  if (!summaryOpen) {
+    document.getElementById('seqbar').style.display = 'none';
+    if (cy) requestAnimationFrame(() => { cy.resize(); cy.fit(); });
+  }
+  document.getElementById('sum-toggle').classList.toggle('active', summaryOpen);
+}
+
+function hideSummaryForQuery() {
+  if (!summaryOpen) return;
+  summaryOpen = false;
+  document.getElementById('summary').style.display = 'none';
+  document.getElementById('cy-wrap').style.display = '';
+  document.getElementById('sum-toggle').classList.remove('active');
+}
+
+async function loadSummary() {
+  if (summaryLoaded) return;
+  const bodyEl = document.getElementById('summary-body');
+  try {
+    const cap = Math.min(TOTAL_COUNT, 300);
+    const r1 = await fetch('/api/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cmd:`head -${cap} "${IDS_PATH}"`, cwd:PATHS.cwd})
+    });
+    const d1 = await r1.json();
+    const numIds = d1.output.split('\n').filter(l=>l.trim()).map(l=>parseInt(l.split('\t')[1])).filter(n=>!isNaN(n));
+    if (!numIds.length) { bodyEl.innerHTML='<div class="sum-loading">No queries found.</div>'; return; }
+
+    const r2 = await fetch('/api/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cmd:`${PATHS.mmseqs} view ${PATHS.aln} --id-list ${numIds.join(',')}`, cwd:PATHS.cwd})
+    });
+    const d2 = await r2.json();
+
+    const targetSet = new Set();
+    for (const line of d2.output.split('\n')) {
+      const f = line.split('\t');
+      if (f.length >= 1 && /^\d+$/.test(f[0].trim())) targetSet.add(f[0].trim());
+    }
+    const targetIds = [...targetSet];
+    if (!targetIds.length) { bodyEl.innerHTML='<div class="sum-loading">No targets found.</div>'; return; }
+
+    const r3 = await fetch('/api/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cmd:`${PATHS.mmseqs} view ${PATHS.target}_func --id-list ${targetIds.join(',')}`, cwd:PATHS.cwd})
+    });
+    const d3 = await r3.json();
+
+    const goCounts = {};
+    for (const entry of d3.output.split('\0')) {
+      const seen = new Set();
+      for (const go of entry.split('\n').map(s=>s.trim()).filter(s=>s.startsWith('GO:'))) {
+        if (!seen.has(go)) { goCounts[go] = (goCounts[go]||0)+1; seen.add(go); }
+      }
+    }
+
+    const byNs = {biological_process:[], molecular_function:[], cellular_component:[]};
+    for (const [go, cnt] of Object.entries(goCounts)) {
+      const info = goInfo && goInfo[go];
+      if (info && byNs[info.ns]) byNs[info.ns].push({go, cnt, name:info.name});
+    }
+    for (const ns of Object.keys(byNs)) {
+      byNs[ns].sort((a,b)=>b.cnt-a.cnt);
+      byNs[ns] = byNs[ns].slice(0,5);
+    }
+
+    const note = cap < TOTAL_COUNT
+      ? `first ${numIds.length} queries \u00b7 ${targetIds.length} targets`
+      : `${numIds.length} queries \u00b7 ${targetIds.length} targets`;
+    document.getElementById('sum-note').textContent = note;
+    renderSummaryBars(byNs);
+    summaryLoaded = true;
+    loadGlobalEnrichment();
+  } catch(e) {
+    bodyEl.innerHTML = `<div class="sum-loading">[Error] ${e.message}</div>`;
+  }
+}
+
+const NS_CFG = {
+  biological_process: {label:'Biological Process', bar:'#6bbbd4', dot:'#a8d8ea'},
+  molecular_function: {label:'Molecular Function',  bar:'#5cc49e', dot:'#a8e6cf'},
+  cellular_component: {label:'Cellular Component',  bar:'#f0a070', dot:'#ffd3b6'},
+};
+
+function renderSummaryBars(byNs) {
+  const body = document.getElementById('summary-body');
+  body.innerHTML = '';
+  for (const [ns, cfg] of Object.entries(NS_CFG)) {
+    const items = byNs[ns] || [];
+    const maxCnt = items.length ? items[0].cnt : 1;
+    const sec = document.createElement('div');
+    sec.className = 'sum-section';
+    const rows = items.length === 0
+      ? '<div class="sum-loading" style="font-size:11px;padding:8px 0">No terms</div>'
+      : items.map(({go, cnt, name}) => {
+          const pct = (cnt / maxCnt * 100).toFixed(1);
+          const label = name.length > 23 ? name.slice(0,21)+'\u2026' : name;
+          return `<div class="sum-bar-row" title="${go}: ${name}">
+            <span class="sum-label">${label}</span>
+            <div class="sum-track"><div class="sum-fill" style="width:${pct}%;background:${cfg.bar}"></div></div>
+            <span class="sum-count">${cnt}</span>
+          </div>`;
+        }).join('');
+    sec.innerHTML = `<div class="sum-section-title">
+        <span class="sum-dot" style="background:${cfg.dot}"></span>${cfg.label}
+      </div>${rows}`;
+    body.appendChild(sec);
+  }
+}
+
+function onGogLoaded(text) {
+  goInfo = parseGog(text);
+  status.textContent = '\u2713 ' + Object.keys(goInfo).length + ' GO terms loaded';
+  status.className = 'ok';
+  fallback.style.display = 'none';
+  empty.textContent = 'Select a query';
+  loadSummary();
+}
+
+fetch('/api/run', {
+  method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({cmd: `cat "${GOG_PATH}"`, cwd: PATHS.cwd})
+})
+  .then(r => r.json())
+  .then(d => {
+    if (!d.output || d.output.startsWith('[Error]')) throw new Error(d.output || 'empty');
+    onGogLoaded(d.output);
+  })
+  .catch(() => {
+    status.textContent = 'Cannot auto-load GOG (' + GOG_PATH + '): select manually';
+    status.className = 'err';
+    fallback.style.display = 'flex';
+    empty.textContent = 'Select the GOG file above';
+  });
+
+document.getElementById('gogFile').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  status.textContent = 'Loading...';
+  status.className = '';
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try { onGogLoaded(ev.target.result); }
+    catch(err) { status.textContent = 'Error: ' + err.message; status.className = 'err'; }
+  };
+  reader.readAsText(file);
+};
+
+function drawGraph(gos, queryGos) {
+  currentGos = gos;
+  if (queryGos !== undefined) currentQueryGos = queryGos;
+  const queryGoSet = new Set(currentQueryGos || []);
+  document.getElementById('empty').style.display = 'none';
+  const elems = [];
+  const usedNs = new Set();
+  const targetSet = new Set(gos.map(([g]) => g));
+  const rootIds = new Set(Object.values(ROOTS).map(r => r.id));
+
+  for (const [goId, cnt, minEv, maxBs] of gos) {
+    const info = goInfo[goId];
+    if (!info) continue;
+    const root = ROOTS[info.ns];
+    if (!root) continue;
+    usedNs.add(info.ns);
+    if (rootIds.has(goId)) continue;
+    const label = info.name.length > 20 ? info.name.slice(0,18)+'...' : info.name;
+    elems.push({data:{id:goId, label:label, fullName:info.name,
+                      type:'target', count:cnt, evalue:minEv, bitscore:maxBs, color:'#FF8C42', ns:info.ns}});
+  }
+
+  const intermediates = showIntermediate ? collectIntermediates(targetSet, rootIds) : {};
+  for (const [goId, info] of Object.entries(intermediates)) {
+    if (ROOTS[info.ns]) usedNs.add(info.ns);
+    const label = info.name.length > 20 ? info.name.slice(0,18)+'...' : info.name;
+    elems.push({data:{id:goId, label:label, fullName:info.name,
+                      type:'intermediate', color:'#ccc', ns:info.ns}});
+  }
+
+  // only nodes actually in elems (skip failed targets)
+  const addedNodeIds = new Set(elems.map(e => e.data.id));
+  const allNodes = addedNodeIds;
+  const addedEdges = new Set();
+  function addEdge(src, tgt, etype) {
+    if (src === tgt) return;
+    const eid = src+'-'+tgt;
+    if (!addedEdges.has(eid)) { elems.push({data:{id:eid,source:src,target:tgt,etype}}); addedEdges.add(eid); }
+  }
+  const allGoIds = [...gos.map(([g])=>g), ...Object.keys(intermediates)];
+  for (const goId of allGoIds) {
+    const info = goInfo[goId];
+    if (!info) continue;
+    let connected = false;
+    for (const pid of (info.parents || [])) {
+      if (!pid) continue;
+      if (allNodes.has(pid)) {
+        const etype = targetSet.has(goId) && targetSet.has(pid) ? 't2t' : 'int';
+        addEdge(goId, pid, etype);
+        connected = true;
+      } else if (rootIds.has(pid)) {
+        addEdge(goId, pid, 't2r');
+        connected = true;
+      } else if (info.ns && ROOTS[info.ns]) {
+        // parent not in graph → attach directly to namespace root
+        addEdge(goId, ROOTS[info.ns].id, 't2r');
+        connected = true;
+      }
+    }
+    if (!connected && info.ns && ROOTS[info.ns]) {
+      addEdge(goId, ROOTS[info.ns].id, 't2r');
+    }
+  }
+
+  for (const ns of usedNs) {
+    const r = ROOTS[ns];
+    if (!r) continue;
+    const isTarget = targetSet.has(r.id);
+    elems.push({data:{id:r.id, label:r.label,
+                      type: isTarget ? 'root-target' : 'root',
+                      color: isTarget ? '#FF8C42' : r.color}});
+  }
+
+  if (cy) { try { cy.destroy(); } catch(e) {} }
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: elems,
+    style: [
+      { selector: 'node[type="root"]', style: {
+          'background-color': 'data(color)', 'label': 'data(label)',
+          'text-valign': 'center', 'text-halign': 'center',
+          'font-size': '11px', 'font-weight': 'bold',
+          'width': '80px', 'height': '80px', 'shape': 'ellipse',
+          'border-width': '2px', 'border-color': '#888',
+          'text-wrap': 'wrap', 'text-max-width': '72px' }},
+      { selector: 'node[type="target"]', style: {
+          'background-color': 'data(color)', 'label': 'data(label)',
+          'text-valign': 'center', 'text-halign': 'center',
+          'font-size': '9px',
+          'width': 'mapData(count,1,20,40,80)',
+          'height': 'mapData(count,1,20,40,80)',
+          'shape': 'round-rectangle',
+          'border-width': '1.5px', 'border-color': '#c05a00',
+          'text-wrap': 'wrap', 'text-max-width': '70px' }},
+      { selector: 'edge[etype="t2r"]', style: {
+          'target-arrow-shape': 'triangle',
+          'line-color': '#bbb', 'target-arrow-color': '#bbb',
+          'curve-style': 'bezier', 'width': '1.5px' }},
+      { selector: 'edge[etype="t2t"]', style: {
+          'target-arrow-shape': 'triangle',
+          'line-color': '#e07030', 'target-arrow-color': '#e07030',
+          'curve-style': 'bezier', 'width': '2px', 'line-style': 'dashed' }},
+      { selector: 'node[type="root-target"]', style: {
+          'background-color': 'data(color)', 'label': 'data(label)',
+          'text-valign': 'center', 'text-halign': 'center',
+          'font-size': '11px', 'font-weight': 'bold',
+          'width': '80px', 'height': '80px', 'shape': 'ellipse',
+          'border-width': '3px', 'border-color': '#c05a00',
+          'text-wrap': 'wrap', 'text-max-width': '72px' }},
+      { selector: 'node[type="intermediate"]', style: {
+          'background-color': 'data(color)', 'label': 'data(label)',
+          'text-valign': 'center', 'text-halign': 'center',
+          'font-size': '8px', 'width': '50px', 'height': '50px',
+          'shape': 'ellipse',
+          'border-width': '1px', 'border-color': '#aaa',
+          'text-wrap': 'wrap', 'text-max-width': '44px' }},
+      { selector: 'edge[etype="int"]', style: {
+          'target-arrow-shape': 'triangle',
+          'line-color': '#ddd', 'target-arrow-color': '#ddd',
+          'curve-style': 'bezier', 'width': '1px' }},
+      { selector: 'node:selected', style: { 'border-width': '3px', 'border-color': '#333' }}
+    ],
+    layout: {
+      name: 'dagre',
+      rankDir: 'BT',
+      ranker: 'network-simplex',
+      nodeSep: 40,
+      rankSep: 60,
+      animate: false
+    }
+  });
+
+  const tip = document.getElementById('tip');
+
+  // --- dev-mode: highlight query's own GO terms ---
+  if (queryGoSet.size > 0) {
+    // collect all node IDs currently in the graph (target + intermediate)
+    const graphNodeIds = new Set(cy.nodes().map(n => n.id()));
+
+    for (const qgo of queryGoSet) {
+      const inGraph = graphNodeIds.has(qgo);
+      const isIntermediate = inGraph && cy.$(`#${CSS.escape(qgo)}`).data('type') === 'intermediate';
+      const isTarget = inGraph && cy.$(`#${CSS.escape(qgo)}`).data('type') === 'target';
+
+      if (isTarget || isIntermediate) {
+        // already in graph — apply purple border
+        const fill = isIntermediate ? '#ccc' : '#FF8C42';
+        cy.$(`#${CSS.escape(qgo)}`).style({
+          'border-color': '#7B2FBE',
+          'border-width': '3px',
+          'background-color': fill
+        });
+      } else {
+        // not in graph at all — add as "query-only" node with white fill
+        const info = goInfo && goInfo[qgo];
+        if (!info) continue;
+        const root = ROOTS[info.ns];
+        if (!root) continue;
+        const label = info.name.length > 20 ? info.name.slice(0, 18) + '...' : info.name;
+        cy.add([
+          {data: {id: qgo, label, fullName: info.name, type: 'query-only', color: '#fff', ns: info.ns}},
+          {data: {id: `${qgo}->${root.id}`, source: qgo, target: root.id, etype: 't2r'}}
+        ]);
+        cy.$(`#${CSS.escape(qgo)}`).style({
+          'background-color': '#fff',
+          'border-color': '#7B2FBE',
+          'border-width': '3px',
+          'label': label,
+          'text-valign': 'center',
+          'text-halign': 'center',
+          'font-size': '9px',
+          'width': '50px',
+          'height': '50px',
+          'shape': 'round-rectangle',
+          'text-wrap': 'wrap',
+          'text-max-width': '44px'
+        });
+      }
+    }
+  }
+
+  // --- helpers for ratio-based node coloring ---
+  const ratioBarEl = document.getElementById('ratio-bar');
+  function resetNodeColors() {
+    cy.nodes('[type="target"]').forEach(n => {
+      n.style({'background-color': '#FF8C42', 'border-color': '#c05a00', 'border-width': '1.5px'});
+    });
+    ratioBarEl.style.display = 'none';
+  }
+  function applyRatioColors(selGoId) {
+    const selSet = new Set(currentGoTargets ? (currentGoTargets[selGoId] || []) : []);
+    const selN = selSet.size;
+    cy.nodes('[type="target"]').forEach(n => {
+      const goId = n.id();
+      if (goId === selGoId) {
+        n.style({'background-color': '#FF8C42', 'border-color': '#c05a00', 'border-width': '3px'});
+        return;
+      }
+      const others = currentGoTargets ? (currentGoTargets[goId] || []) : [];
+      const overlap = selN > 0 ? others.filter(t => selSet.has(t)).length : 0;
+      const ratio = selN > 0 ? overlap / selN : 0;
+      n.style({'background-color': ratioColor(ratio), 'border-color': '#ccc', 'border-width': '1.5px'});
+    });
+    ratioBarEl.style.display = 'block';
+    const cb = document.getElementById('ratio-colorbar');
+    if (cb) drawRatioBar(cb);
+  }
+  function getOverlapRatio(selGoId, otherGoId) {
+    if (!currentGoTargets) return null;
+    const selSet = new Set(currentGoTargets[selGoId] || []);
+    if (!selSet.size) return null;
+    const others = currentGoTargets[otherGoId] || [];
+    const overlap = others.filter(t => selSet.has(t)).length;
+    return overlap / selSet.size;
+  }
+
+  // --- tooltip ---
+  cy.on('mouseover', 'node[type="target"]', evt => {
+    const d = evt.target.data();
+    let html = `<b>${d.id}</b><br>${d.fullName}<br>count: ${d.count}<br>min e-value: ${d.evalue}<br>max bitscore: ${d.bitscore}`;
+    if (_selectedGo && _selectedGo !== d.id) {
+      const ratio = getOverlapRatio(_selectedGo, d.id);
+      if (ratio !== null) {
+        html += `<br><span style="color:#9de">overlap with selected: ${(ratio*100).toFixed(1)}%</span>`;
+        html += `<br><span style="color:#888;font-size:10px">targets sharing both GO terms / targets of selected GO</span>`;
+      }
+    }
+    tip.innerHTML = html;
+    tip.style.display = 'block';
+  });
+  cy.on('mouseout', 'node', () => { tip.style.display = 'none'; });
+  cy.on('mousemove', evt => {
+    tip.style.left = (evt.originalEvent.clientX+12)+'px';
+    tip.style.top  = (evt.originalEvent.clientY+12)+'px';
+  });
+
+  // --- drag: children follow parent ---
+  let _dragNode = null, _prevPos = null, _dragKids = null;
+  cy.on('grab', 'node', evt => {
+    _dragNode = evt.target;
+    _prevPos = {..._dragNode.position()};
+    const btn = evt.originalEvent ? evt.originalEvent.button : 0;
+    _dragKids = btn === 2 ? cy.collection() : _dragNode.predecessors('node');
+  });
+  cy.on('drag', 'node', evt => {
+    if (!_dragNode || evt.target !== _dragNode || !_dragKids) return;
+    const cur = _dragNode.position();
+    const dx = cur.x - _prevPos.x;
+    const dy = cur.y - _prevPos.y;
+    _prevPos = {x: cur.x, y: cur.y};
+    if (dx === 0 && dy === 0) return;
+    cy.batch(() => {
+      _dragKids.forEach(n => {
+        const p = n.position();
+        n.position({x: p.x + dx, y: p.y + dy});
+      });
+    });
+  });
+  cy.on('free', 'node', () => { _dragNode = null; _dragKids = null; });
+
+  // --- double-click: collapse / expand subtree ---
+  const _collapsed = new Map();
+  cy.on('dbltap', 'node', evt => {
+    tip.style.display = 'none';
+    const node = evt.target;
+    const id = node.id();
+    if (_collapsed.has(id)) {
+      const {nodes: kids, positions} = _collapsed.get(id);
+      _collapsed.delete(id);
+      kids.forEach(n => n.position(node.position()));
+      kids.show();
+      kids.animate({style: {opacity: 1}}, {duration: 0});
+      kids.forEach(n => n.animate({position: positions[n.id()]}, {duration: 220}));
+    } else {
+      const kids = node.predecessors('node').not(':hidden');
+      if (!kids.length) return;
+      const positions = {};
+      kids.forEach(n => { positions[n.id()] = {...n.position()}; });
+      _collapsed.set(id, {nodes: kids, positions});
+      let done = 0;
+      kids.forEach(n => {
+        n.animate({position: node.position()}, {
+          duration: 200,
+          complete: () => { if (++done === kids.length) kids.hide(); }
+        });
+      });
+    }
+  });
+
+  // --- GO node tap: sequence coverage + ratio coloring ---
+  let _selectedGo = null;
+  function deselect() {
+    _selectedGo = null;
+    resetNodeColors();
+    if (currentSeq) renderSeqBar(activeEntry, currentSeq, null);
+  }
+  cy.on('tap', 'node[type="target"]', evt => {
+    const goId = evt.target.id();
+    if (_selectedGo === goId) { deselect(); return; }
+    _selectedGo = goId;
+    applyRatioColors(goId);
+    if (currentGoCoverage && currentSeq) renderSeqBar(activeEntry, currentSeq, currentGoCoverage[goId]);
+  });
+  cy.on('tap', 'node[type="root"],node[type="root-target"],node[type="intermediate"]', deselect);
+  cy.on('tap', evt => { if (evt.target === cy) deselect(); });
+}
+
+// ─── enrichment section ───────────────────────────────────────────────────
+let enrichData = [];
+let enrichNsFilter = 'all';
+let enrichHighlight = null;
+let _volcanoHandlers = null;
+
+function setEnrichNs(ns) {
+  enrichNsFilter = ns;
+  document.querySelectorAll('.ns-tab').forEach(b => b.classList.toggle('active', b.dataset.ns === ns));
+  if (enrichData.length) renderEnrichView();
+}
+
+async function loadGlobalEnrichment() {
+  document.getElementById('enrich-placeholder').style.display = 'flex';
+  document.getElementById('enrich-no-db').style.display = 'none';
+  document.getElementById('enrich-content').style.display = 'none';
+  enrichData = [];
+  enrichHighlight = null;
+
+  if (!ENRICH_GLOBAL_PATH) {
+    document.getElementById('enrich-placeholder').style.display = 'none';
+    document.getElementById('enrich-no-db').style.display = 'flex';
+    return;
+  }
+
+  try {
+    const r = await fetch('/api/run', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cmd: `cat "${ENRICH_GLOBAL_PATH}"`, cwd: PATHS.cwd})
+    });
+    const d = await r.json();
+    const raw = d.output || '';
+    if (!raw.trim()) {
+      const ph = document.getElementById('enrich-placeholder');
+      ph.textContent = 'No global enrichment data — run m2g goenrich first';
+      ph.style.display = 'flex';
+      return;
+    }
+    for (const line of raw.split('\n')) {
+      if (!line.trim() || line.startsWith('go_id')) continue;
+      const c = line.split('\t');
+      if (c.length < 10) continue;
+      enrichData.push({
+        goId: c[0], goName: c[1], ns: c[2],
+        k: parseInt(c[3]), M: parseInt(c[4]),
+        n: parseInt(c[5]), N: parseInt(c[6]),
+        ratio: parseFloat(c[7]), pval: parseFloat(c[8]), adjP: parseFloat(c[9])
+      });
+    }
+    renderEnrichView();
+  } catch(e) {
+    document.getElementById('enrich-no-db').style.display = 'flex';
+  }
+}
+
+function renderEnrichView() {
+  const filtered = enrichNsFilter === 'all'
+    ? enrichData
+    : enrichData.filter(d => d.ns === enrichNsFilter);
+
+  document.getElementById('enrich-placeholder').style.display = 'none';
+  document.getElementById('enrich-no-db').style.display = 'none';
+
+  if (!filtered.length) {
+    const ph = document.getElementById('enrich-placeholder');
+    ph.textContent = 'No terms for this namespace';
+    ph.style.display = 'flex';
+    document.getElementById('enrich-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('enrich-content').style.display = 'flex';
+  drawVolcano(filtered);
+  renderEnrichTable(filtered);
+}
+
+function drawVolcano(data) {
+  const canvas = document.getElementById('enrich-volcano');
+  const wrap = document.getElementById('enrich-volcano-wrap');
+  const W = Math.max(wrap.clientWidth, 200);
+  const H = Math.max(wrap.clientHeight - 2, 150);
+  canvas.width = W; canvas.height = H;
+  const PAD = {top: 18, right: 10, bottom: 26, left: 34};
+  const pw = W - PAD.left - PAD.right;
+  const ph = H - PAD.top - PAD.bottom;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  const log2Rs = data.map(d => d.ratio > 0 ? Math.log2(d.ratio) : -10);
+  const negLPs = data.map(d => -Math.log10(Math.max(d.adjP, 1e-300)));
+  const xMin = Math.min(-0.5, ...log2Rs) - 0.2;
+  const xMax = Math.max(0.5, ...log2Rs) + 0.2;
+  const yMax = Math.max(1.5, ...negLPs) * 1.08;
+
+  function toX(v) { return PAD.left + (v - xMin) / (xMax - xMin) * pw; }
+  function toY(v) { return PAD.top + ph - v / yMax * ph; }
+
+  // threshold and zero lines
+  const pThr = -Math.log10(0.05);
+  ctx.save();
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(PAD.left, toY(pThr)); ctx.lineTo(PAD.left + pw, toY(pThr)); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = '#e0e0e0';
+  ctx.beginPath(); ctx.moveTo(toX(0), PAD.top); ctx.lineTo(toX(0), PAD.top + ph); ctx.stroke();
+  ctx.restore();
+
+  // axes box
+  ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1;
+  ctx.strokeRect(PAD.left, PAD.top, pw, ph);
+
+  // points
+  data.forEach((d, i) => {
+    const cx = toX(log2Rs[i]), cy = toY(negLPs[i]);
+    const sig = d.adjP < 0.05;
+    const color = sig ? (log2Rs[i] > 0 ? '#d04040' : '#4070c0') : '#bbb';
+    const r = enrichHighlight === d.goId ? 5 : 3;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = color; ctx.fill();
+    if (enrichHighlight === d.goId) {
+      ctx.strokeStyle = '#222'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+  });
+
+  // axis labels
+  ctx.fillStyle = '#888'; ctx.font = '9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('log₂(ratio)', PAD.left + pw / 2, H - 3);
+  ctx.save();
+  ctx.translate(9, PAD.top + ph / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText('-log₁₀(adj.p)', 0, 0);
+  ctx.restore();
+
+  // tick labels
+  ctx.fillStyle = '#aaa'; ctx.font = '8px sans-serif';
+  const step = pw / pw < 1 ? 1 : Math.ceil((xMax - xMin) / 6);
+  for (let v = Math.ceil(xMin); v <= Math.floor(xMax); v++) {
+    ctx.textAlign = 'center';
+    ctx.fillText(v, toX(v), PAD.top + ph + 10);
+  }
+  ctx.textAlign = 'right';
+  ctx.fillText('p=0.05', PAD.left - 2, toY(pThr) + 3);
+
+  // store points for hover/click
+  canvas._pts = data.map((d, i) => ({goId: d.goId, cx: toX(log2Rs[i]), cy: toY(negLPs[i])}));
+
+  // (re-)attach event handlers
+  if (_volcanoHandlers) {
+    canvas.removeEventListener('mousemove', _volcanoHandlers.mm);
+    canvas.removeEventListener('mouseleave', _volcanoHandlers.ml);
+    canvas.removeEventListener('click', _volcanoHandlers.cl);
+  }
+  const tip = document.getElementById('tip');
+  function nearestPt(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let best = null, bestD = 10;
+    for (const pt of (canvas._pts || [])) {
+      const d = Math.hypot(mx - pt.cx, my - pt.cy);
+      if (d < bestD) { best = pt; bestD = d; }
+    }
+    return best;
+  }
+  _volcanoHandlers = {
+    mm: (e) => {
+      const pt = nearestPt(e);
+      if (pt) {
+        const row = enrichData.find(d => d.goId === pt.goId);
+        if (row) {
+          tip.innerHTML = `<b>${row.goId}</b><br>${row.goName}<br>ratio: ${row.ratio.toFixed(3)}<br>adj.p: ${row.adjP.toExponential(2)}`;
+          tip.style.display = 'block';
+          tip.style.left = (e.clientX + 12) + 'px';
+          tip.style.top = (e.clientY + 12) + 'px';
+        }
+      } else { tip.style.display = 'none'; }
+    },
+    ml: () => { tip.style.display = 'none'; },
+    cl: (e) => {
+      const pt = nearestPt(e);
+      if (!pt) return;
+      enrichHighlight = enrichHighlight === pt.goId ? null : pt.goId;
+      const filtered = enrichNsFilter === 'all' ? enrichData : enrichData.filter(d => d.ns === enrichNsFilter);
+      drawVolcano(filtered);
+      document.querySelectorAll('#enrich-tbody tr').forEach(r => r.classList.remove('e-hl'));
+      if (enrichHighlight) {
+        const tr = document.querySelector(`#enrich-tbody tr[data-go="${enrichHighlight}"]`);
+        if (tr) { tr.classList.add('e-hl'); tr.scrollIntoView({block: 'nearest'}); }
+      }
+    }
+  };
+  canvas.addEventListener('mousemove', _volcanoHandlers.mm);
+  canvas.addEventListener('mouseleave', _volcanoHandlers.ml);
+  canvas.addEventListener('click', _volcanoHandlers.cl);
+}
+
+function renderEnrichTable(data) {
+  const tbody = document.getElementById('enrich-tbody');
+  tbody.innerHTML = '';
+  for (const d of data) {
+    const sig = d.adjP < 0.05;
+    const ns = d.ns === 'biological_process' ? 'BP' : d.ns === 'molecular_function' ? 'MF' : 'CC';
+    const name = d.goName.length > 30 ? d.goName.slice(0, 28) + '…' : d.goName;
+    const tr = document.createElement('tr');
+    tr.dataset.go = d.goId;
+    if (enrichHighlight === d.goId) tr.classList.add('e-hl');
+    tr.innerHTML = `<td class="enrich-go-id">${d.goId}</td>
+      <td class="enrich-name" title="${d.goName}">${name}</td>
+      <td>${ns}</td><td>${d.k}/${d.M}</td>
+      <td class="${sig ? 'enrich-sig' : ''}">${d.ratio.toFixed(2)}</td>
+      <td class="enrich-adj-p">${d.adjP.toExponential(1)}</td>`;
+    tr.onclick = () => {
+      enrichHighlight = enrichHighlight === d.goId ? null : d.goId;
+      document.querySelectorAll('#enrich-tbody tr').forEach(r => r.classList.remove('e-hl'));
+      if (enrichHighlight) tr.classList.add('e-hl');
+      const filtered = enrichNsFilter === 'all' ? enrichData : enrichData.filter(r => r.ns === enrichNsFilter);
+      drawVolcano(filtered);
+    };
+    tbody.appendChild(tr);
+  }
+}
+</script>
+</body></html>

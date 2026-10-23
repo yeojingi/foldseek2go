@@ -1,0 +1,22 @@
+set(func_header_files
+        func/GeneOntology.h
+        func/FuncReader.h
+        func/goparser.h
+        func/Scorer.h
+        func/Aggregator.h
+        func/GoEnrichment.h
+        func/Blast2Go.h
+        PARENT_SCOPE
+        )
+set(func_source_files
+        func/createfuncdb.cpp
+        func/GeneOntology.cpp
+        func/goparser.cpp
+        func/functionreport.cpp
+        func/Scorer.cpp
+        func/Aggregator.cpp
+        func/goenrich.cpp
+        func/Blast2Go.cpp
+        func/goic.cpp
+        PARENT_SCOPE
+        )
