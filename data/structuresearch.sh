@@ -145,6 +145,22 @@ fi
 # shellcheck disable=SC2086
 "$MMSEQS" mvdb "${TMP_PATH}/aln" "${RESULTS}" ${VERBOSITY}
 
+# structurealign --align2b-exclusion writes per-rank outputs next to its result
+if [ -n "${ALIGN2B_EXCLUSION}" ]; then
+    if [ -n "${EXPAND}" ]; then
+        ALIGN2B_SRC="${TMP_PATH}/aln"
+    else
+        ALIGN2B_SRC="${TMP_PATH}/strualn"
+    fi
+    # same ranks as exclusionRankNames in structurealign.cpp
+    for RANK in species genus family order class phylum superkingdom; do
+        for SUFFIX in "_${RANK}" "_${RANK}_t1noexcl" "_t1align_${RANK}"; do
+            # shellcheck disable=SC2086
+            "$MMSEQS" mvdb "${ALIGN2B_SRC}${SUFFIX}" "${RESULTS}${SUFFIX}" ${VERBOSITY}
+        done
+    done
+fi
+
 if [ -n "$REMOVE_TMP" ]; then
     echo "Removing temporary files"
     if [ "$ALIGNMENT_ALGO" = "tmalign" ]; then

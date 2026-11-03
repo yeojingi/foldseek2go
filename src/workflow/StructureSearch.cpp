@@ -152,6 +152,7 @@ int structuresearch(int argc, const char **argv, const Command &command) {
         cmd.addVariable("ALIGNMENT_PAR", par.createParameterString(par.structurealign).c_str());
     }
     cmd.addVariable("REMOVE_TMP", par.removeTmpFiles ? "TRUE" : NULL);
+    cmd.addVariable("ALIGN2B_EXCLUSION", (par.align2b && par.align2bExclusion) ? "TRUE" : NULL);
     cmd.addVariable("RUNNER", par.runner.c_str());
     cmd.addVariable("VERBOSITY", par.createParameterString(par.onlyverbosity).c_str());
     std::string program;
