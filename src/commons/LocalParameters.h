@@ -173,6 +173,7 @@ public:
     PARAMETER(PARAM_MIN_ALIGNED_CHAINS)
     PARAMETER(PARAM_MULTIDOMAIN)
     PARAMETER(PARAM_ALIGN2B)
+    PARAMETER(PARAM_ALIGN2B_EXCLUSION)
 
     float tmScoreThr;
     int tmScoreThrMode;
@@ -210,6 +211,7 @@ public:
     int minAlignedChains;
     int multiDomain;
     int align2b;
+    int align2bExclusion;
 
     static std::vector<int> getOutputFormat(
         int formatMode, const std::string &outformat, bool &needSequences, bool &need3Di, bool &needBacktrace, bool &needFullHeaders,
