@@ -13,6 +13,9 @@
 #include "Coordinate16.h"
 #include "LDDT.h"
 
+#include <cfloat>
+#include <cstdint>
+
 #ifdef OPENMP
 #include <omp.h>
 #endif
@@ -40,20 +43,24 @@ int alignStructure(StructureSmithWaterman & structureSmithWaterman,
                    unsigned int querySeqLen, unsigned int targetSeqLen,
                    EvalueNeuralNet & evaluer, std::pair<double, double> muLambda,
                    Matcher::result_t & res, std::string & backtrace,
-                   Parameters & par) {
+                   Parameters & par, double evalThr, float covThr, int32_t minScore) {
 
     float seqId = 0.0;
     backtrace.clear();
     // align only score and end pos
     StructureSmithWaterman::s_align align = structureSmithWaterman.alignScoreEndPos<StructureSmithWaterman::PROFILE>(tSeqAA.numSequence, tSeq3Di.numSequence, targetSeqLen, par.gapOpen.values.aminoacid(),
                                                                                     par.gapExtend.values.aminoacid(), querySeqLen / 2);
-    bool hasLowerCoverage = !(Util::hasCoverage(par.covThr, par.covMode, align.qCov, align.tCov));
+    bool hasLowerCoverage = !(Util::hasCoverage(covThr, par.covMode, align.qCov, align.tCov));
     if(hasLowerCoverage){
+        return -1;
+    }
+    // the reverse score is only subtracted, so the forward score is an upper bound
+    if (static_cast<int32_t>(align.score1) < minScore) {
         return -1;
     }
     // we can already stop if this e-value isn't good enough, it wont be any better in the next step
     align.evalue = evaluer.computeEvalueCorr(align.score1, muLambda.first, muLambda.second);
-    bool hasLowerEvalue = align.evalue > par.evalThr;
+    bool hasLowerEvalue = align.evalue > evalThr;
     if(hasLowerEvalue){
         return -1;
     }
@@ -67,8 +74,11 @@ int alignStructure(StructureSmithWaterman & structureSmithWaterman,
                                                                   par.gapExtend.values.aminoacid(), querySeqLen / 2);
     //}
     int32_t score = static_cast<int32_t>(align.score1) - static_cast<int32_t>(revAlign.score1);
+    if (score < minScore) {
+        return -1;
+    }
     align.evalue = evaluer.computeEvalueCorr(score, muLambda.first, muLambda.second);
-    hasLowerEvalue = align.evalue > par.evalThr;
+    hasLowerEvalue = align.evalue > evalThr;
     if (hasLowerEvalue) {
         return -1;
     }
@@ -96,7 +106,7 @@ int alignStructure(StructureSmithWaterman & structureSmithWaterman,
                                                                                                par.gapExtend.values.aminoacid(),
                                                                                                par.alignmentMode,
                                                                                                backtrace, align,
-                                                                                               par.covMode, par.covThr,
+                                                                                               par.covMode, covThr,
                                                                                                querySeqLen / 2);
     }
 
@@ -127,7 +137,8 @@ int computeAlternativeAlignment(StructureSmithWaterman & structureSmithWaterman,
     }
     if (alignStructure(structureSmithWaterman, reverseStructureSmithWaterman,
                        tSeqAA, tSeq3Di, querySeqLen, targetSeqLen,
-                       evaluer, muLambda, altRes, backtrace, par) == -1) {
+                       evaluer, muLambda, altRes, backtrace, par,
+                       par.evalThr, par.covThr, INT32_MIN) == -1) {
         return -1;
     }
     if (Alignment::checkCriteria(altRes, false, par.evalThr, par.seqIdThr, par.alnLenThr, par.covMode, par.covThr)) {
@@ -194,6 +205,11 @@ int structurealign(int argc, const char **argv, const Command& command) {
             Debug(Debug::WARNING) << "This impacts the final score and ranking of hits, but not E-values themselves. Ranking alterations primarily occur for E-values < 10^-1.\n";
             par.sortByStructureBits = false;
         }
+    }
+
+    if (par.align2b && par.alignmentMode == Parameters::ALIGNMENT_MODE_SCORE_ONLY) {
+        Debug(Debug::ERROR) << "--align2b needs the aligned region of the top hit, cannot use --alignment-mode 1\n";
+        EXIT(EXIT_FAILURE);
     }
 
     DBReader<unsigned int> resultReader(par.db3.c_str(), par.db3Index.c_str(), par.threads, DBReader<unsigned int>::USE_DATA|DBReader<unsigned int>::USE_INDEX);
@@ -304,6 +320,9 @@ int structurealign(int argc, const char **argv, const Command& command) {
         Sequence qSeq3Di(par.maxSeqLen, q3DiDbr->getDbtype(), (const BaseMatrix *) &subMat3Di, 0, false, par.compBiasCorrection);
         Sequence tSeqAA(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &subMatAA, 0, false, par.compBiasCorrection);
         Sequence tSeq3Di(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &subMat3Di, 0, false, par.compBiasCorrection);
+        Sequence t1SeqAA(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &subMatAA, 0, false, par.compBiasCorrection);
+        Sequence t1Seq3Di(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &subMat3Di, 0, false, par.compBiasCorrection);
+        Matcher::result_t t1Hit;
         std::string backtrace;
         char buffer[1024+32768];
         std::string resultBuffer;
@@ -319,6 +338,7 @@ int structurealign(int argc, const char **argv, const Command& command) {
         for (size_t id = 0; id < resultReader.getSize(); id++) {
             progress.updateProgress();
             char *data = resultReader.getData(id, thread_idx);
+            char *origData = data;
             size_t queryKey = resultReader.getDbKey(id);
             if(*data != '\0') {
                 unsigned int queryId = q3DiDbr->sequenceReader->getId(queryKey);
@@ -347,6 +367,8 @@ int structurealign(int argc, const char **argv, const Command& command) {
                 reverseStructureSmithWaterman.ssw_init(&qSeqAA, &qSeq3Di, tinySubMatAA, tinySubMat3Di, &subMatAA);
                 int passedNum = 0;
                 int rejected = 0;
+                bool hasT1 = false;
+                int32_t t1Score = 0;
                 while (*data != '\0' && passedNum < par.maxAccept && rejected < par.maxRejected) {
                     char dbKeyBuffer[255 + 1];
                     Util::parseKey(data, dbKeyBuffer);
@@ -368,12 +390,15 @@ int structurealign(int argc, const char **argv, const Command& command) {
                     Matcher::result_t res;
                     if(alignStructure(structureSmithWaterman, reverseStructureSmithWaterman,
                                       tSeqAA, tSeq3Di, querySeqLen, targetSeqLen,
-                                      evaluer, muLambda, res, backtrace, par) == -1){
+                                      evaluer, muLambda, res, backtrace, par,
+                                      par.evalThr, par.covThr, INT32_MIN) == -1){
                         rejected++;
                         continue;
                     }
 
                     if (Alignment::checkCriteria(res, isIdentity, par.evalThr, par.seqIdThr, par.alnLenThr, par.covMode, par.covThr)) {
+                        // raw bitscore, before it gets scaled into structure bits
+                        const int32_t rawScore = res.score;
                         if(needCalpha) {
                             size_t tId = tcadbr->sequenceReader->getId(res.dbKey);
                             char *tcadata = tcadbr->sequenceReader->getData(tId, thread_idx);
@@ -411,6 +436,11 @@ int structurealign(int argc, const char **argv, const Command& command) {
                         }
 
 
+                        if (par.align2b && (hasT1 == false || rawScore > t1Score)) {
+                            t1Hit = res;
+                            t1Score = rawScore;
+                            hasT1 = true;
+                        }
                         alignmentResult.emplace_back(res);
                         int altAli = par.altAlignment;
                         bool moreAltAli = true;
@@ -431,6 +461,53 @@ int structurealign(int argc, const char **argv, const Command& command) {
                         rejected = 0;
                     } else {
                         rejected++;
+                    }
+                }
+
+                // 2b: realign the aligned region of the top hit (T1) against all candidates and
+                // keep targets with bits(T1,T) >= bits(Q,T1). Reported alignments are T1 vs target.
+                if (par.align2b && hasT1) {
+                    unsigned int t1Id = t3DiDbr.sequenceReader->getId(t1Hit.dbKey);
+                    char *t1DataAA = tAADbr.sequenceReader->getData(t1Id, thread_idx);
+                    char *t1Data3Di = t3DiDbr.sequenceReader->getData(t1Id, thread_idx);
+                    const unsigned int t1RegionLen = t1Hit.dbEndPos - t1Hit.dbStartPos + 1;
+                    t1SeqAA.mapSequence(t1Id, t1Hit.dbKey, t1DataAA + t1Hit.dbStartPos, t1RegionLen);
+                    t1Seq3Di.mapSequence(t1Id, t1Hit.dbKey, t1Data3Di + t1Hit.dbStartPos, t1RegionLen);
+                    std::pair<double, double> t1MuLambda = evaluer.predictMuLambda(t1Seq3Di.numSequence, t1Seq3Di.L);
+                    structureSmithWaterman.ssw_init(&t1SeqAA, &t1Seq3Di, tinySubMatAA, tinySubMat3Di, &subMatAA);
+                    t1Seq3Di.reverse();
+                    t1SeqAA.reverse();
+                    reverseStructureSmithWaterman.ssw_init(&t1SeqAA, &t1Seq3Di, tinySubMatAA, tinySubMat3Di, &subMatAA);
+
+                    alignmentResult.clear();
+                    data = origData;
+                    passedNum = 0;
+                    rejected = 0;
+                    while (*data != '\0' && passedNum < par.maxAccept && rejected < par.maxRejected) {
+                        char dbKeyBuffer[255 + 1];
+                        Util::parseKey(data, dbKeyBuffer);
+                        data = Util::skipLine(data);
+                        const unsigned int dbKey = (unsigned int) strtoul(dbKeyBuffer, NULL, 10);
+                        unsigned int targetId = t3DiDbr.sequenceReader->getId(dbKey);
+
+                        char * targetSeq3Di = t3DiDbr.sequenceReader->getData(targetId, thread_idx);
+                        char * targetSeqAA = tAADbr.sequenceReader->getData(targetId, thread_idx);
+                        const int targetSeqLen = static_cast<int>(t3DiDbr.sequenceReader->getSeqLen(targetId));
+                        tSeq3Di.mapSequence(targetId, dbKey, targetSeq3Di, targetSeqLen);
+                        tSeqAA.mapSequence(targetId, dbKey, targetSeqAA, targetSeqLen);
+
+                        // cut on bitscore only
+                        Matcher::result_t res;
+                        if (alignStructure(structureSmithWaterman, reverseStructureSmithWaterman,
+                                           tSeqAA, tSeq3Di, t1RegionLen, targetSeqLen,
+                                           evaluer, t1MuLambda, res, backtrace, par,
+                                           DBL_MAX, 0.0f, t1Score) == -1) {
+                            rejected++;
+                            continue;
+                        }
+                        alignmentResult.emplace_back(res);
+                        passedNum++;
+                        rejected = 0;
                     }
                 }
             }
