@@ -15,8 +15,11 @@
 #include "NcbiTaxonomy.h"
 #include "MappingReader.h"
 #include "PrefilteringIndexReader.h"
+#include "SubstitutionMatrix.h"
+#include "EvalueComputation.h"
 
 #include <cfloat>
+#include <climits>
 #include <cstdint>
 
 #ifdef OPENMP
@@ -234,12 +237,18 @@ int structurealign(int argc, const char **argv, const Command& command) {
         }
     }
 
-    if (par.align2b && par.alignmentMode == Parameters::ALIGNMENT_MODE_SCORE_ONLY) {
+    if (par.align2b && par.align2bMix) {
+        Debug(Debug::ERROR) << "Cannot use --align2b and --align2b-mix together\n";
+        EXIT(EXIT_FAILURE);
+    }
+    // --align2b-mix runs the same 2b block, only the Q-T1 bitscore and the rescan use sequence alignment
+    const bool align2b = par.align2b || par.align2bMix;
+    if (align2b && par.alignmentMode == Parameters::ALIGNMENT_MODE_SCORE_ONLY) {
         Debug(Debug::ERROR) << "--align2b needs the aligned region of the top hit, cannot use --alignment-mode 1\n";
         EXIT(EXIT_FAILURE);
     }
-    if (par.align2bExclusion && par.align2b == false) {
-        Debug(Debug::ERROR) << "--align2b-exclusion needs --align2b 1\n";
+    if (par.align2bExclusion && align2b == false) {
+        Debug(Debug::ERROR) << "--align2b-exclusion needs --align2b 1 or --align2b-mix 1\n";
         EXIT(EXIT_FAILURE);
     }
     NcbiTaxonomy *taxonomy = NULL;
@@ -339,6 +348,10 @@ int structurealign(int argc, const char **argv, const Command& command) {
     }
     float aaFactor = (par.alignmentType == LocalParameters::ALIGNMENT_TYPE_3DI_AA) ? 1.4 : 0.0;
     SubstitutionMatrix subMatAA(blosum.c_str(), aaFactor, par.scoreBias);
+    // align2b-mix: plain mmseqs amino acid alignment (BLOSUM62, bit factor 2.0, gap 11/1, as in mmseqs defaults)
+    const int seqGapOpen = 11;
+    const int seqGapExtend = 1;
+    SubstitutionMatrix seqMatAA(blosum.c_str(), 2.0, 0.0);
     //temporary output file
     Debug::Progress progress(resultReader.getSize());
 
@@ -382,6 +395,18 @@ int structurealign(int argc, const char **argv, const Command& command) {
         Sequence tSeq3Di(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &subMat3Di, 0, false, par.compBiasCorrection);
         Sequence t1SeqAA(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &subMatAA, 0, false, par.compBiasCorrection);
         Sequence t1Seq3Di(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &subMat3Di, 0, false, par.compBiasCorrection);
+        EvalueComputation *seqEvaluer = NULL;
+        Matcher *seqMatcher = NULL;
+        Sequence *seqQRegion = NULL;
+        Sequence *seqT1Region = NULL;
+        Sequence *seqTarget = NULL;
+        if (par.align2bMix) {
+            seqEvaluer = new EvalueComputation(tAADbr.sequenceReader->getAminoAcidDBSize(), &seqMatAA, seqGapOpen, seqGapExtend);
+            seqMatcher = new Matcher(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, &seqMatAA, seqEvaluer, par.compBiasCorrection, 1.0, seqGapOpen, seqGapExtend, 0.0, par.zdrop);
+            seqQRegion = new Sequence(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &seqMatAA, 0, false, par.compBiasCorrection);
+            seqT1Region = new Sequence(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &seqMatAA, 0, false, par.compBiasCorrection);
+            seqTarget = new Sequence(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, (const BaseMatrix *) &seqMatAA, 0, false, par.compBiasCorrection);
+        }
         // align2b: primary pass-1 hits (score = raw bitscore), the candidate list with the rank of
         // each candidate's LCA with the query, and one T1-region rescan per distinct T1
         struct Rescan {
@@ -515,7 +540,7 @@ int structurealign(int argc, const char **argv, const Command& command) {
                         }
 
 
-                        if (par.align2b) {
+                        if (align2b) {
                             p1Hits.emplace_back(res);
                             p1Hits.back().score = rawScore;
                         }
@@ -544,7 +569,7 @@ int structurealign(int argc, const char **argv, const Command& command) {
 
                 // 2b: realign the aligned region of the top hit (T1) against all candidates and
                 // keep targets with bits(T1,T) >= bits(Q,T1). Reported alignments are T1 vs target.
-                if (par.align2b && p1Hits.empty() == false) {
+                if (align2b && p1Hits.empty() == false) {
                     // exclusion can't work without taxonomy, so a missing taxon is an error
                     auto lookupTaxon = [&](MappingReader *mapping, size_t key, const char *what) -> TaxID {
                         const TaxID taxon = mapping->lookup(key);
@@ -605,6 +630,45 @@ int structurealign(int argc, const char **argv, const Command& command) {
                         char *t1DataAA = tAADbr.sequenceReader->getData(t1Id, thread_idx);
                         char *t1Data3Di = t3DiDbr.sequenceReader->getData(t1Id, thread_idx);
                         const unsigned int t1RegionLen = t1Hit.dbEndPos - t1Hit.dbStartPos + 1;
+
+                        int scanPassed = 0;
+                        int scanRejected = 0;
+                        if (par.align2bMix) {
+                            // bits(Q,T1) = sequence bitscore of the query region vs the T1 region, 0 if they don't align
+                            const unsigned int qRegionLen = t1Hit.qEndPos - t1Hit.qStartPos + 1;
+                            seqQRegion->mapSequence(queryId, queryKey, querySeqAA + t1Hit.qStartPos, qRegionLen);
+                            seqT1Region->mapSequence(t1Id, t1Hit.dbKey, t1DataAA + t1Hit.dbStartPos, t1RegionLen);
+                            seqMatcher->initQuery(seqQRegion);
+                            Matcher::result_t qT1Res = seqMatcher->getSWResult(seqT1Region, INT_MAX, false, 0, 0.0f, DBL_MAX,
+                                                                               Matcher::SCORE_COV_SEQID, par.seqIdMode, false);
+                            const int qT1Bits = (qT1Res.backtrace.empty() || qT1Res.score < 0) ? 0 : qT1Res.score;
+
+                            seqMatcher->initQuery(seqT1Region);
+                            for (size_t c = 0; c < candKeys.size(); c++) {
+                                if (stopEarly && (scanPassed >= par.maxAccept || scanRejected >= par.maxRejected)) {
+                                    break;
+                                }
+                                scan.scanned = c + 1;
+                                const unsigned int dbKey = candKeys[c];
+                                unsigned int targetId = tAADbr.sequenceReader->getId(dbKey);
+                                char * targetSeqAA = tAADbr.sequenceReader->getData(targetId, thread_idx);
+                                const int targetSeqLen = static_cast<int>(tAADbr.sequenceReader->getSeqLen(targetId));
+                                seqTarget->mapSequence(targetId, dbKey, targetSeqAA, targetSeqLen);
+
+                                // cut on bitscore only
+                                Matcher::result_t res = seqMatcher->getSWResult(seqTarget, INT_MAX, false, 0, 0.0f, DBL_MAX,
+                                                                                Matcher::SCORE_COV_SEQID, par.seqIdMode, false);
+                                if (res.backtrace.empty() || res.score < qT1Bits) {
+                                    scanRejected++;
+                                    continue;
+                                }
+                                scan.passed.emplace_back(c, res);
+                                scanPassed++;
+                                scanRejected = 0;
+                            }
+                            return rescans.size() - 1;
+                        }
+
                         t1SeqAA.mapSequence(t1Id, t1Hit.dbKey, t1DataAA + t1Hit.dbStartPos, t1RegionLen);
                         t1Seq3Di.mapSequence(t1Id, t1Hit.dbKey, t1Data3Di + t1Hit.dbStartPos, t1RegionLen);
                         std::pair<double, double> t1MuLambda = evaluer.predictMuLambda(t1Seq3Di.numSequence, t1Seq3Di.L);
@@ -613,8 +677,6 @@ int structurealign(int argc, const char **argv, const Command& command) {
                         t1SeqAA.reverse();
                         reverseStructureSmithWaterman.ssw_init(&t1SeqAA, &t1Seq3Di, tinySubMatAA, tinySubMat3Di, &subMatAA);
 
-                        int scanPassed = 0;
-                        int scanRejected = 0;
                         for (size_t c = 0; c < candKeys.size(); c++) {
                             if (stopEarly && (scanPassed >= par.maxAccept || scanRejected >= par.maxRejected)) {
                                 break;
@@ -727,6 +789,13 @@ int structurealign(int argc, const char **argv, const Command& command) {
         }
         if(needLDDT){
             delete lddtcalculator;
+        }
+        if (par.align2bMix) {
+            delete seqTarget;
+            delete seqT1Region;
+            delete seqQRegion;
+            delete seqMatcher;
+            delete seqEvaluer;
         }
     }
 

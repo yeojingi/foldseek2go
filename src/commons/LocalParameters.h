@@ -174,6 +174,7 @@ public:
     PARAMETER(PARAM_MULTIDOMAIN)
     PARAMETER(PARAM_ALIGN2B)
     PARAMETER(PARAM_ALIGN2B_EXCLUSION)
+    PARAMETER(PARAM_ALIGN2B_MIX)
 
     float tmScoreThr;
     int tmScoreThrMode;
@@ -212,6 +213,7 @@ public:
     int multiDomain;
     int align2b;
     int align2bExclusion;
+    int align2bMix;
 
     static std::vector<int> getOutputFormat(
         int formatMode, const std::string &outformat, bool &needSequences, bool &need3Di, bool &needBacktrace, bool &needFullHeaders,
