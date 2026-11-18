@@ -296,8 +296,10 @@ std::vector<Command> foldseekCommands = {
         {"computeglob",          computeglob,             &localPar.computeglob,          COMMAND_SEQUENCE,
                 "Compute globularity (packing density, normed radius of gyration) from C-alpha coordinates",
                 "# Each entry of globDB is \"<packing density>\\t<normed radius of gyration>\\n\"\n"
-                "foldseek computeglob structureDB globDB\n",
-                "yeojingi",
+                "foldseek computeglob structureDB globDB\n\n"
+                "# Adapted from N. Bordin et al., AlphaFold2 reveals commonalities and novelties in protein structure space\n"
+                "# for 21 model organisms. Commun. Biol. 6, 160 (2023). doi: 10.1038/s42003-023-04488-9; pmid: 36755055\n",
+                "Jingi Yeo <jingiyeo@snu.ac.kr>",
                 "<i:Db> <o:globDB>",
                 CITATION_FOLDSEEK, {{"Db", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, &DbValidator::sequenceDb },
                                            {"globDB", DbType::ACCESS_MODE_OUTPUT, DbType::NEED_DATA, &DbValidator::genericDb }}},
