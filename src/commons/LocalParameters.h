@@ -131,6 +131,7 @@ public:
     std::vector<MMseqsParameter *> createmultimerreport;
     std::vector<MMseqsParameter *> expandmultimer;
     std::vector<MMseqsParameter *> convert2pdb;
+    std::vector<MMseqsParameter *> computeglob;
     std::vector<MMseqsParameter *> makepaddeddb;
     std::vector<MMseqsParameter *> result2structprofile;
     std::vector<MMseqsParameter *> createstructsubdb;
@@ -174,6 +175,7 @@ public:
     PARAMETER(PARAM_MULTIDOMAIN)
     PARAMETER(PARAM_ALIGN2B)
     PARAMETER(PARAM_ALIGN2B_EXCLUSION)
+    PARAMETER(PARAM_GLOB_DISTANCE)
 
     float tmScoreThr;
     int tmScoreThrMode;
@@ -212,6 +214,7 @@ public:
     int multiDomain;
     int align2b;
     int align2bExclusion;
+    float globDistance;
 
     static std::vector<int> getOutputFormat(
         int formatMode, const std::string &outformat, bool &needSequences, bool &need3Di, bool &needBacktrace, bool &needFullHeaders,

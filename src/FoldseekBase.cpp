@@ -293,6 +293,14 @@ std::vector<Command> foldseekCommands = {
                 "<i:Db> <o:pdbFile|pdbDir>",
                 CITATION_FOLDSEEK, {{"Db", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA|DbType::NEED_HEADER, &DbValidator::sequenceDb },
                                            {"pdbFile", DbType::ACCESS_MODE_OUTPUT, DbType::NEED_DATA, &DbValidator::flatfile}}},
+        {"computeglob",          computeglob,             &localPar.computeglob,          COMMAND_SEQUENCE,
+                "Compute globularity (packing density, normed radius of gyration) from C-alpha coordinates",
+                "# Each entry of globDB is \"<packing density>\\t<normed radius of gyration>\\n\"\n"
+                "foldseek computeglob structureDB globDB\n",
+                "yeojingi",
+                "<i:Db> <o:globDB>",
+                CITATION_FOLDSEEK, {{"Db", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, &DbValidator::sequenceDb },
+                                           {"globDB", DbType::ACCESS_MODE_OUTPUT, DbType::NEED_DATA, &DbValidator::genericDb }}},
         {"scoremultimer", scoremultimer, &localPar.scoremultimer, COMMAND_ALIGNMENT,
                 "Get multimer level alignments from alignmentDB",
                 "# Get multimer level alignments (chain assignments and tm-scores) from alignmentDB.\n"

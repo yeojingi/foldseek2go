@@ -45,7 +45,8 @@ LocalParameters::LocalParameters() :
         PARAM_MIN_ALIGNED_CHAINS(PARAM_MIN_ALIGNED_CHAINS_ID, "--min-aligned-chains", "Minimum threshold of aligned chains","save alignments with at least n chain aligned between query and target" ,typeid(int), (void *) &minAlignedChains, "^[0-9]{1}[0-9]*$"),
         PARAM_MULTIDOMAIN(PARAM_MULTIDOMAIN_ID, "--lolalign-multidomain", "MultiDomain Mode", "MultiDomain Mode LoLalign", typeid(int), (void *) &multiDomain, "^[0-1]{1}$"),
         PARAM_ALIGN2B(PARAM_ALIGN2B_ID, "--align2b", "2b alignment", "Pick the top hit (T1) by bitscore, realign its aligned region against all candidates and keep targets with bits(T1,T) >= bits(Q,T1); reported alignments are T1 vs target", typeid(int), (void *) &align2b, "^[0-1]{1}$", MMseqsParameter::COMMAND_ALIGN | MMseqsParameter::COMMAND_EXPERT),
-        PARAM_ALIGN2B_EXCLUSION(PARAM_ALIGN2B_EXCLUSION_ID, "--align2b-exclusion", "2b taxonomic exclusion", "Taxonomic exclusion benchmark for --align2b: per rank (species..superkingdom) write <alnDB>_<rank> (T1 and T2 exclude targets within that rank of the query), <alnDB>_<rank>_t1noexcl (only T2 excluded) and <alnDB>_t1align_<rank> (query-T1 alignment). Needs _mapping and _taxonomy for query and target", typeid(int), (void *) &align2bExclusion, "^[0-1]{1}$", MMseqsParameter::COMMAND_ALIGN | MMseqsParameter::COMMAND_EXPERT)
+        PARAM_ALIGN2B_EXCLUSION(PARAM_ALIGN2B_EXCLUSION_ID, "--align2b-exclusion", "2b taxonomic exclusion", "Taxonomic exclusion benchmark for --align2b: per rank (species..superkingdom) write <alnDB>_<rank> (T1 and T2 exclude targets within that rank of the query), <alnDB>_<rank>_t1noexcl (only T2 excluded) and <alnDB>_t1align_<rank> (query-T1 alignment). Needs _mapping and _taxonomy for query and target", typeid(int), (void *) &align2bExclusion, "^[0-1]{1}$", MMseqsParameter::COMMAND_ALIGN | MMseqsParameter::COMMAND_EXPERT),
+        PARAM_GLOB_DISTANCE(PARAM_GLOB_DISTANCE_ID, "--glob-distance", "Globularity C-alpha distance", "C-alpha distance cutoff (Angstrom) for counting neighbors of hydrophobic residues in the packing density", typeid(float), (void *) &globDistance, "^[0-9]*(\\.[0-9]+)?$")
         {
     PARAM_ALIGNMENT_MODE.description = "How to compute the alignment:\n0: automatic\n1: only score and end_pos\n2: also start_pos and cov\n3: also seq.id";
     PARAM_ALIGNMENT_MODE.regex = "^[0-3]{1}$";
@@ -259,6 +260,12 @@ LocalParameters::LocalParameters() :
     convert2pdb.push_back(&PARAM_THREADS);
     convert2pdb.push_back(&PARAM_V);
 
+    // computeglob
+    computeglob.push_back(&PARAM_GLOB_DISTANCE);
+    computeglob.push_back(&PARAM_COMPRESSED);
+    computeglob.push_back(&PARAM_THREADS);
+    computeglob.push_back(&PARAM_V);
+
     // structuresearchworkflow
     structuresearchworkflow = combineList(structurealign, prefilter);
     structuresearchworkflow = combineList(structuresearchworkflow, ungappedprefilter);
@@ -370,6 +377,7 @@ LocalParameters::LocalParameters() :
 
     align2b = 0;
     align2bExclusion = 0;
+    globDistance = 8.0;
 
     citations.emplace(CITATION_FOLDSEEK, "van Kempen, M., Kim, S.S., Tumescheit, C., Mirdita, M., Lee, J., Gilchrist, C.L.M., Söding, J., and Steinegger, M. Fast and accurate protein structure search with Foldseek. Nature Biotechnology, doi:10.1038/s41587-023-01773-0 (2023)");
     citations.emplace(CITATION_FOLDSEEK_MULTIMER, "Kim, W., Mirdita, M., Levy Karin, E., Gilchrist, C.L.M., Schweke, H., Söding, J., Levy, E., and Steinegger, M. Rapid and sensitive protein complex alignment with Foldseek-Multimer. Nature Methods, doi:10.1038/s41592-025-02593-7 (2025)");
